@@ -511,6 +511,56 @@ describe("ExtensionRelayBridge", () => {
     expect(bridge.extensionConnected).toBe(false);
   });
 
+  it("reattaches unchanged accessible tabs after the extension reconnects", async () => {
+    const bridge = new ExtensionRelayBridge();
+    const tabs = defaultTabs();
+    const first = wireExtension(bridge);
+    sendHello(first.handlers, tabs);
+
+    const client = new FakeSocket();
+    const cdp = bridge.attachCdpClientSocket(client);
+    cdp.onMessage(
+      JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: { autoAttach: true } }),
+    );
+    await flush();
+    expect(
+      client.frames().filter((frame) => frame.method === "Target.attachedToTarget"),
+    ).toHaveLength(1);
+
+    first.handlers.onClose();
+    expect(bridge.accessibleTabs()).toEqual(tabs);
+    expect(
+      client.frames().filter((frame) => frame.method === "Target.detachedFromTarget"),
+    ).toHaveLength(1);
+
+    const replacement = wireExtension(bridge);
+    sendHello(replacement.handlers, tabs);
+    await flush();
+
+    expect(
+      replacement.socket
+        .frames()
+        .filter((frame) => frame.type === "attach")
+        .map((frame) => frame.tabId),
+    ).toEqual([1]);
+    const attached = client.frames().filter((frame) => frame.method === "Target.attachedToTarget");
+    expect(attached).toHaveLength(2);
+    expect(
+      attached.map(
+        (frame) => (frame.params as { targetInfo: { targetId: string } }).targetInfo.targetId,
+      ),
+    ).toEqual(["target-1", "target-1"]);
+    expect(
+      new Set(attached.map((frame) => (frame.params as { sessionId: string }).sessionId)).size,
+    ).toBe(2);
+
+    cdp.onMessage(JSON.stringify({ id: 2, method: "Target.getTargets" }));
+    await flush();
+    expect(client.frames().find((frame) => frame.id === 2)?.result).toMatchObject({
+      targetInfos: [{ targetId: "target-1" }],
+    });
+  });
+
   it("reports malformed CDP client JSON instead of leaving the client waiting", () => {
     const bridge = new ExtensionRelayBridge();
     const client = new FakeSocket();

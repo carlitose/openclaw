@@ -370,17 +370,17 @@ export class ExtensionRelayBridge {
         existing.info = info;
       } else {
         this.tabs.set(info.tabId, { info });
-        // Newly accessible tabs must reach auto-attach clients immediately;
-        // an access-mode or pause change may happen mid-session.
-        if ([...this.clients].some((client) => client.autoAttach)) {
-          void this.ensureTabAttached(info.tabId)
-            .then(({ targetId, sessionId }) => {
-              this.announceAttachedTab(info.tabId, targetId, sessionId, { onlyAutoAttach: true });
-            })
-            .catch((err: unknown) => {
-              log.warn(`auto-attach of accessible tab ${info.tabId} failed: ${String(err)}`);
-            });
-        }
+      }
+      // Accessible tabs must reach auto-attach clients immediately, including
+      // unchanged tab ids reported after the extension reconnects.
+      if ([...this.clients].some((client) => client.autoAttach)) {
+        void this.ensureTabAttached(info.tabId)
+          .then(({ targetId, sessionId }) => {
+            this.announceAttachedTab(info.tabId, targetId, sessionId, { onlyAutoAttach: true });
+          })
+          .catch((err: unknown) => {
+            log.warn(`auto-attach of accessible tab ${info.tabId} failed: ${String(err)}`);
+          });
       }
     }
   }
