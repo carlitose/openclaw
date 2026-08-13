@@ -561,6 +561,43 @@ describe("ExtensionRelayBridge", () => {
     });
   });
 
+  it("replaces an in-flight attach when the extension reconnects", async () => {
+    const bridge = new ExtensionRelayBridge();
+    const tabs = defaultTabs();
+    const firstSocket = new FakeSocket();
+    const first = bridge.attachExtensionSocket(firstSocket);
+    sendHello(first, tabs);
+
+    const client = new FakeSocket();
+    const cdp = bridge.attachCdpClientSocket(client);
+    cdp.onMessage(
+      JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: { autoAttach: true } }),
+    );
+    await flush();
+    expect(firstSocket.frames().filter((frame) => frame.type === "attach")).toHaveLength(1);
+
+    first.onClose();
+    const replacement = wireExtension(bridge);
+    sendHello(replacement.handlers, tabs);
+    await flush();
+
+    expect(
+      replacement.socket
+        .frames()
+        .filter((frame) => frame.type === "attach")
+        .map((frame) => frame.tabId),
+    ).toEqual([1]);
+    expect(
+      client.frames().filter((frame) => frame.method === "Target.attachedToTarget"),
+    ).toHaveLength(1);
+
+    cdp.onMessage(JSON.stringify({ id: 2, method: "Target.getTargets" }));
+    await flush();
+    expect(client.frames().find((frame) => frame.id === 2)?.result).toMatchObject({
+      targetInfos: [{ targetId: "target-1" }],
+    });
+  });
+
   it("reports malformed CDP client JSON instead of leaving the client waiting", () => {
     const bridge = new ExtensionRelayBridge();
     const client = new FakeSocket();

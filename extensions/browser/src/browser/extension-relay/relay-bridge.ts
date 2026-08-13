@@ -288,6 +288,7 @@ export class ExtensionRelayBridge {
     // Tell CDP clients their pages are gone; the tab list itself survives so a
     // reconnecting extension can re-expose the same tabs.
     for (const [tabId, tab] of this.tabs) {
+      tab.attaching = undefined;
       if (tab.attached) {
         this.emitDetachedFromTarget(tabId, tab.attached.sessionId, tab.attached.targetId);
         tab.attached = undefined;
@@ -419,7 +420,9 @@ export class ExtensionRelayBridge {
     try {
       return await attaching;
     } finally {
-      tab.attaching = undefined;
+      if (tab.attaching === attaching) {
+        tab.attaching = undefined;
+      }
     }
   }
 
