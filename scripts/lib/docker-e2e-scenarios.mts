@@ -544,6 +544,15 @@ export const mainLanes: DockerE2eLane[] = [
     weight: 3,
   }),
   serviceLane(
+    "personal-chrome-isolation",
+    "OPENCLAW_SKIP_DOCKER_BUILD=1 pnpm test:docker:personal-chrome-isolation",
+    {
+      stateScenario: "empty",
+      timeoutMs: 20 * 60 * 1000,
+      weight: 3,
+    },
+  ),
+  serviceLane(
     "sandbox-browser-sidecar",
     "OPENCLAW_SKIP_DOCKER_BUILD=1 pnpm test:docker:sandbox-browser-sidecar",
     {

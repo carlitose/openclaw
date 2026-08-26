@@ -8,6 +8,7 @@ export function createRelayCommandHandler({
   scheduleTabsSync,
   captureAccess,
   requireAccessibleTab,
+  rememberUtilityWorld,
 }) {
   return async (message) => {
     const { seq } = message;
@@ -35,6 +36,14 @@ export function createRelayCommandHandler({
             message.params ?? {},
           );
           await requireAccessibleTab(message.tabId, epoch);
+          if (
+            message.sessionId === undefined &&
+            message.method === "Page.addScriptToEvaluateOnNewDocument" &&
+            typeof message.params?.worldName === "string" &&
+            message.params.worldName.length > 0
+          ) {
+            rememberUtilityWorld(message.tabId, message.params.worldName);
+          }
           send({ type: "result", seq, result: result ?? {} });
           return;
         }

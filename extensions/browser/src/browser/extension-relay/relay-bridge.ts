@@ -29,6 +29,9 @@ const EXTENSION_PING_INTERVAL_MS = 20_000;
 const BROWSER_TARGET_ID = "openclaw-extension-relay";
 /** Playwright requires every attached page target to identify its browser context. */
 const BROWSER_CONTEXT_ID = "openclaw-extension-context";
+// Playwright bootstraps new pages at about:blank, which is intentionally outside
+// the extension ACL. Use an empty ordinary document without widening that boundary.
+const ACCESSIBLE_BLANK_PAGE_URL = "data:text/html,";
 
 /** Minimal socket seam so tests can drive the bridge without real WebSockets. */
 type BridgeSocket = {
@@ -322,6 +325,7 @@ export class ExtensionRelayBridge {
 
   private handleExtensionGone(): void {
     this.extension = null;
+    this.connectionEvents.dispatchEvent(new Event("tabs"));
     this.stopPing();
     for (const pending of this.pendingExtension.values()) {
       clearTimeout(pending.timer);
@@ -427,6 +431,35 @@ export class ExtensionRelayBridge {
             log.warn(`auto-attach of accessible tab ${info.tabId} failed: ${String(err)}`);
           });
       }
+    }
+    this.connectionEvents.dispatchEvent(new Event("tabs"));
+  }
+
+  private async waitForAccessibleTab(
+    tabId: number,
+    owner: NonNullable<ExtensionRelayBridge["extension"]>,
+  ): Promise<void> {
+    const timeout = new AbortController();
+    const timer = setTimeout(() => timeout.abort(), EXTENSION_COMMAND_TIMEOUT_MS);
+    try {
+      while (true) {
+        if (this.extension !== owner) {
+          throw new Error("extension disconnected while creating tab");
+        }
+        if (this.tabs.has(tabId)) {
+          return;
+        }
+        // createTab resolves when Chrome allocates an id, before a navigating tab
+        // necessarily crosses the extension's ordinary-document access boundary.
+        await once(this.connectionEvents, "tabs", { signal: timeout.signal });
+      }
+    } catch (error) {
+      if (timeout.signal.aborted) {
+        throw new Error(`tab ${tabId} did not become available to OpenClaw`, { cause: error });
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -947,21 +980,23 @@ export class ExtensionRelayBridge {
         return;
       }
       case "Target.createTarget": {
-        const url = typeof request.params?.url === "string" ? request.params.url : "about:blank";
+        const requestedUrl =
+          typeof request.params?.url === "string" ? request.params.url : "about:blank";
+        const url = requestedUrl === "about:blank" ? ACCESSIBLE_BLANK_PAGE_URL : requestedUrl;
         const createParams = resolveCreateTargetParams(request.params);
         const command = { type: "createTab", url, ...createParams } as const;
+        const extension = this.extension;
+        if (!extension) {
+          this.respondError(client, request, "OpenClaw Chrome extension is not connected");
+          return;
+        }
         const created = (await this.callExtension(command)) as { tabId?: unknown } | null;
         if (typeof created?.tabId !== "number") {
           this.respondError(client, request, "extension did not return a tabId for createTab");
           return;
         }
         const tabId = created.tabId;
-        if (!this.tabs.has(tabId)) {
-          this.tabs.set(tabId, {
-            info: { tabId, url, title: "", active: false },
-            restoreAttachment: false,
-          });
-        }
+        await this.waitForAccessibleTab(tabId, extension);
         const attached = await this.ensureTabAttached(tabId);
         // Announce before responding, mirroring Chrome's event-then-result order.
         this.announceAttachedTab(tabId, attached.targetId, attached.sessionId, {
@@ -1041,6 +1076,7 @@ export class ExtensionRelayBridge {
     this.extensionCandidates.clear();
     this.extension?.socket.close(1001, "relay stopped");
     this.extension = null;
+    this.connectionEvents.dispatchEvent(new Event("tabs"));
     this.connectionEvents.dispatchEvent(new Event("ready"));
     for (const client of this.clients) {
       client.socket.close(1001, "relay stopped");

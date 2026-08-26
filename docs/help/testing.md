@@ -1021,6 +1021,39 @@ Manual ACP plain-language thread smoke (not CI):
 - `bun scripts/dev/discord-acp-plain-language-smoke.ts --channel <discord-channel-id> ...`
 - Keep this script for regression/debug workflows. It may be needed again for ACP thread routing validation, so do not delete it.
 
+## Personal Chrome isolation harness
+
+Browser-extension development uses a disposable harness and never uses the operator's OpenClaw
+state or Chrome profile. Run the focused contracts with:
+
+```bash
+pnpm test:e2e:personal-chrome-isolation
+pnpm test:docker:personal-chrome-isolation
+pnpm test:e2e:personal-chrome-isolation:windows
+```
+
+The Windows command builds the candidate first, downloads pinned Chrome for Testing
+`152.0.7977.64` into the run's temporary root, verifies its pinned SHA-256 and exact file
+version, and command-line-loads only the candidate unpacked extension. It refuses to run while any foreign
+`chrome.exe` process or native-host registration exists. Its temporary native-host registration
+is removed after the disposable Chrome process stops. Browser actions use only the candidate
+OpenClaw CLI and extension; Playwright, Puppeteer, direct CDP, browser MCP, and Codex browser
+control are forbidden for that Chrome process.
+
+Evidence from the lanes has a strict claim ceiling:
+
+| Lane                             | Establishes                                                                                                           | Does not establish                                                                      |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Focused contracts                | Temporary state/config/workspace, free ports, loopback fixtures, controller exclusion, and forced-failure cleanup     | A real Chrome or MV3 service worker                                                     |
+| Docker package/relay             | The packed Gateway, Browser Relay Authentication v2, a synthetic extension peer, and teardown in isolated Linux state | Chrome extension UI, Windows profile behavior, or browser sessions                      |
+| Native disposable Windows Chrome | Candidate MV3 loading and relay behavior in a task-owned Chrome for Testing profile                                   | Personal cookies, signed-in state, restart, RDP, or reboot behavior                     |
+| Disposable Windows VM            | Restart, RDP-disconnect, and reboot behavior with synthetic state after its separate provisioning gate                | Safety or correctness in the operator's personal profile                                |
+| Personal-profile acceptance      | Only the explicitly authorized final check against a frozen candidate                                                 | General automated coverage; it never authorizes development runs against personal state |
+
+The native lane serves root, popup, redirect, authentication-challenge, denied-destination, and
+unrelated-tab fixtures on task-owned loopback listeners. A passing Docker lane is necessary but
+is never reported as Windows or personal-profile proof.
+
 Useful env vars:
 
 - `OPENCLAW_CONFIG_DIR=...` (default: `~/.openclaw`) mounted to `/home/node/.openclaw`

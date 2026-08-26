@@ -27,7 +27,7 @@ class FakeSocket {
  * Scripted extension: auto-answers relay commands so the bridge can complete
  * attach/CDP round-trips. Attach returns a deterministic targetId per tab.
  */
-function wireExtension(bridge: ExtensionRelayBridge) {
+function wireExtension(bridge: ExtensionRelayBridge, opts: { syncCreatedTab?: boolean } = {}) {
   const socket = new FakeSocket();
   const handlers = bridge.attachExtensionSocket(socket);
   // Auto-reply to commands the bridge issues to the extension.
@@ -42,6 +42,19 @@ function wireExtension(bridge: ExtensionRelayBridge) {
       const reply = replyFor(msg);
       if (reply) {
         handlers.onMessage(JSON.stringify(reply));
+        if (msg.type === "createTab" && opts.syncCreatedTab !== false) {
+          queueMicrotask(() => {
+            handlers.onMessage(
+              JSON.stringify({
+                type: "tabs",
+                tabs: [
+                  ...defaultTabs(),
+                  { tabId: 999, url: msg.url, title: "", active: msg.background !== true },
+                ],
+              }),
+            );
+          });
+        }
       }
     });
   };
@@ -445,6 +458,66 @@ describe("ExtensionRelayBridge", () => {
       background: true,
       focus: false,
     });
+  });
+
+  it("bootstraps about:blank through an accessible document before attaching", async () => {
+    const bridge = new ExtensionRelayBridge();
+    const { socket, handlers } = wireExtension(bridge, { syncCreatedTab: false });
+    sendHello(handlers);
+
+    const client = new FakeSocket();
+    const cdp = bridge.attachCdpClientSocket(client);
+    cdp.onMessage(
+      JSON.stringify({ id: 1, method: "Target.createTarget", params: { url: "about:blank" } }),
+    );
+    await flush();
+
+    expect(socket.frames()).toContainEqual(
+      expect.objectContaining({ type: "createTab", url: "data:text/html," }),
+    );
+    expect(socket.frames()).not.toContainEqual(
+      expect.objectContaining({ type: "attach", tabId: 999 }),
+    );
+    expect(client.frames()).not.toContainEqual(expect.objectContaining({ id: 1 }));
+
+    handlers.onMessage(
+      JSON.stringify({
+        type: "tabs",
+        tabs: [...defaultTabs(), { tabId: 999, url: "data:text/html,", title: "", active: false }],
+      }),
+    );
+    await flush();
+
+    expect(socket.frames()).toContainEqual(expect.objectContaining({ type: "attach", tabId: 999 }));
+    expect(client.frames()).toContainEqual({ id: 1, result: { targetId: "target-999" } });
+    bridge.dispose();
+  });
+
+  it("does not finish tab creation through a replacement extension", async () => {
+    const bridge = new ExtensionRelayBridge();
+    const initial = wireExtension(bridge, { syncCreatedTab: false });
+    sendHello(initial.handlers);
+
+    const client = new FakeSocket();
+    const cdp = bridge.attachCdpClientSocket(client);
+    cdp.onMessage(
+      JSON.stringify({ id: 1, method: "Target.createTarget", params: { url: "https://new.test" } }),
+    );
+    await flush();
+
+    const replacement = wireExtension(bridge);
+    sendHello(replacement.handlers, [
+      { tabId: 999, url: "https://replacement.test", title: "", active: true },
+    ]);
+    await flush();
+
+    expect(client.frames().find((frame) => frame.id === 1)).toMatchObject({
+      error: { message: "extension disconnected while creating tab" },
+    });
+    expect(replacement.socket.frames()).not.toContainEqual(
+      expect.objectContaining({ type: "attach", tabId: 999 }),
+    );
+    bridge.dispose();
   });
 
   it("preserves an explicit foreground Target.createTarget request", async () => {
