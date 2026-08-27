@@ -53,8 +53,12 @@ let retiredCopilotCustodyBlocked = true;
 const attachedTabs = new Set();
 /** Access epoch proven for each attachment; debugger events use this synchronously. */
 const attachedAccessEpochs = new Map();
+/** Opaque generation for each live chrome.debugger attachment. */
+const attachmentTokens = new Map();
 /** In-flight attach promises per tab id (coalesces concurrent attaches). */
 const attachingTabs = new Map();
+/** Root automation world learned from the active debugger client's setup. */
+const utilityWorldNames = new Map();
 /** Debounce handle for tab-list refreshes. */
 let tabsSyncTimer = null;
 let accessMutationChain = Promise.resolve();
@@ -266,6 +270,9 @@ async function attachDebugger(tabId) {
       await detachDebugger(tabId);
       throw new Error(`tab ${tabId} access was revoked`);
     }
+    if (!attachmentTokens.has(tabId)) {
+      attachmentTokens.set(tabId, Symbol("debugger attachment"));
+    }
     attachedAccessEpochs.set(tabId, accessEpoch);
     return { targetId: target?.id ?? `tab-${tabId}` };
   })();
@@ -282,6 +289,8 @@ async function detachDebugger(tabId) {
   // The unconditional detach closes that revocation race.
   attachedTabs.delete(tabId);
   attachedAccessEpochs.delete(tabId);
+  attachmentTokens.delete(tabId);
+  utilityWorldNames.delete(tabId);
   try {
     await chrome.debugger.detach({ tabId });
   } catch {
@@ -422,6 +431,11 @@ const handleRelayCommand = createRelayCommandHandler({
   scheduleTabsSync,
   captureAccess: (tabId) => tabAccessPolicy.capture(tabId),
   requireAccessibleTab: (tabId, epoch) => tabAccessPolicy.requireTab(tabId, epoch),
+  rememberUtilityWorld: (tabId, worldName) => {
+    // A reconnected debugger client owns a new named utility world. The latest
+    // proven root setup command is the session fact needed after navigation.
+    utilityWorldNames.set(tabId, worldName);
+  },
 });
 
 async function sendHello() {
@@ -634,6 +648,7 @@ registerTabAccessEvents({
   policy: tabAccessPolicy,
   attachedTabs,
   attachedAccessEpochs,
+  attachmentTokens,
   attachingTabs,
   send,
   scheduleTabsSync,
@@ -641,6 +656,8 @@ registerTabAccessEvents({
   pauseTab,
   removeTabFromOpenClawGroup,
   runAccessMutation,
+  getUtilityWorldName: (tabId) => utilityWorldNames.get(tabId),
+  forgetUtilityWorld: (tabId) => utilityWorldNames.delete(tabId),
 });
 
 // Watchdog: MV3 can stop this worker; the alarm revives it and re-connects.

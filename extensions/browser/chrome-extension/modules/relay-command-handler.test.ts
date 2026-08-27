@@ -5,6 +5,7 @@ function createHarness() {
   const send = vi.fn();
   const epoch = { revision: 1, tabRevision: 2 };
   const requireAccessibleTab = vi.fn(async () => ({ id: 7, windowId: 3 }));
+  const rememberUtilityWorld = vi.fn();
   const focusWindowForTab = vi.fn(async () => undefined);
   const chromeMock = {
     debugger: { sendCommand: vi.fn(async () => ({ value: 1 })) },
@@ -24,8 +25,17 @@ function createHarness() {
     scheduleTabsSync: vi.fn(),
     captureAccess: vi.fn(() => epoch),
     requireAccessibleTab,
+    rememberUtilityWorld,
   });
-  return { chromeMock, epoch, focusWindowForTab, handler, requireAccessibleTab, send };
+  return {
+    chromeMock,
+    epoch,
+    focusWindowForTab,
+    handler,
+    rememberUtilityWorld,
+    requireAccessibleTab,
+    send,
+  };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -39,6 +49,19 @@ describe("relay authority rechecks", () => {
       [7, harness.epoch],
     ]);
     expect(harness.send).toHaveBeenCalledWith({ type: "result", seq: 1, result: { value: 1 } });
+  });
+
+  it("remembers the root automation world only after the command remains authorized", async () => {
+    const harness = createHarness();
+    await harness.handler({
+      type: "cdp",
+      seq: 5,
+      tabId: 7,
+      method: "Page.addScriptToEvaluateOnNewDocument",
+      params: { source: "", worldName: "__automation_world" },
+    });
+
+    expect(harness.rememberUtilityWorld).toHaveBeenCalledWith(7, "__automation_world");
   });
 
   it("checks access around tab activation and window focus", async () => {
@@ -71,5 +94,6 @@ describe("relay authority rechecks", () => {
       seq: 4,
       message: "tab 7 access was revoked",
     });
+    expect(harness.rememberUtilityWorld).not.toHaveBeenCalled();
   });
 });

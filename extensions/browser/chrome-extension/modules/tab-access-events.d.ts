@@ -1,4 +1,4 @@
-import type { TabAccessEpoch, TabAccessMode } from "./tab-access.js";
+import type { TabAccessEpoch, TabAccessMode, TabAccessState } from "./tab-access.js";
 
 type ChromeEvent<Listener> = {
   addListener(listener: Listener): void;
@@ -6,6 +6,11 @@ type ChromeEvent<Listener> = {
 
 export type TabAccessEventsChromeApi = {
   debugger: {
+    sendCommand(
+      target: { tabId: number },
+      method: string,
+      params?: Record<string, unknown>,
+    ): Promise<Record<string, unknown> | undefined>;
     onEvent: ChromeEvent<
       (source: { tabId?: number; sessionId?: string }, method: string, params: unknown) => void
     >;
@@ -30,7 +35,7 @@ export type TabAccessEventPolicy = {
   epochIsCurrent(tabId: number, epoch: TabAccessEpoch): boolean;
   invalidateTab(tabId: number): void;
   invalidateAll(): void;
-  inspectTab(tabId: number, epoch: TabAccessEpoch): Promise<{ accessible: boolean }>;
+  inspectTab(tabId: number, epoch: TabAccessEpoch): Promise<TabAccessState>;
   listAccessibleTabs(): Promise<Array<{ id: number }>>;
   forgetTab(tabId: number): Promise<void>;
   replaceTab(addedTabId: number, removedTabId: number): Promise<boolean>;
@@ -42,6 +47,7 @@ export function registerTabAccessEvents(options: {
   policy: TabAccessEventPolicy;
   attachedTabs: Set<number>;
   attachedAccessEpochs: Map<number, TabAccessEpoch>;
+  attachmentTokens: Map<number, symbol>;
   attachingTabs: Map<number, Promise<unknown>>;
   send(message: Record<string, unknown>): void;
   scheduleTabsSync(): void;
@@ -49,4 +55,6 @@ export function registerTabAccessEvents(options: {
   pauseTab(tabId: number): void | Promise<void>;
   removeTabFromOpenClawGroup(tabId: number): void | Promise<void>;
   runAccessMutation(task: () => void | Promise<void>): Promise<void>;
+  getUtilityWorldName(tabId: number): string | undefined;
+  forgetUtilityWorld(tabId: number): void;
 }): void;

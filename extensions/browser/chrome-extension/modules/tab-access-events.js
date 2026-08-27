@@ -1,4 +1,5 @@
 import { ACCESS_MODE_ALL, ACCESS_MODE_SELECTED } from "./relay-core.js";
+import { effectiveTabUrl } from "./tab-eligibility.js";
 
 /** Register Chrome lifecycle events that can grant, revoke, or project tab access. */
 export function registerTabAccessEvents({
@@ -7,6 +8,7 @@ export function registerTabAccessEvents({
   policy,
   attachedTabs,
   attachedAccessEpochs,
+  attachmentTokens,
   attachingTabs,
   send,
   scheduleTabsSync,
@@ -14,11 +16,73 @@ export function registerTabAccessEvents({
   pauseTab,
   removeTabFromOpenClawGroup,
   runAccessMutation,
+  getUtilityWorldName,
+  forgetUtilityWorld,
 }) {
   let groupEventRevision = 0;
+  const mainContextProbes = new Map();
+  const attachmentIsCurrent = (tabId, accessEpoch, attachmentToken) =>
+    policy.epochIsCurrent(tabId, accessEpoch) &&
+    attachedTabs.has(tabId) &&
+    attachmentTokens.get(tabId) === attachmentToken;
+  const probeMainContextId = async (tabId, accessEpoch, attachmentToken) => {
+    const probe = {
+      accessEpoch,
+      attachmentToken,
+      bindingName: `__openclaw_context_probe_${crypto.randomUUID()}`,
+      contextId: undefined,
+    };
+    mainContextProbes.set(tabId, probe);
+    let bindingInstalled = false;
+    try {
+      await chromeApi.debugger.sendCommand({ tabId }, "Runtime.addBinding", {
+        name: probe.bindingName,
+        executionContextName: "",
+      });
+      bindingInstalled = true;
+      if (!attachmentIsCurrent(tabId, accessEpoch, attachmentToken)) {
+        return undefined;
+      }
+      const bindingReference = `globalThis[${JSON.stringify(probe.bindingName)}]`;
+      // The binding event reports the default context id. The same evaluation
+      // deletes the temporary page property before the session binding is removed.
+      await chromeApi.debugger.sendCommand({ tabId }, "Runtime.evaluate", {
+        expression: `try { ${bindingReference}(""); } finally { delete ${bindingReference}; }`,
+        silent: true,
+      });
+      return probe.contextId;
+    } catch {
+      return undefined;
+    } finally {
+      // A unique binding may outlive an access epoch, but never its debugger
+      // attachment. Remove it without mutating a replacement attachment.
+      if (bindingInstalled && attachmentTokens.get(tabId) === attachmentToken) {
+        await chromeApi.debugger
+          .sendCommand({ tabId }, "Runtime.removeBinding", { name: probe.bindingName })
+          .catch(() => undefined);
+      }
+      if (mainContextProbes.get(tabId) === probe) {
+        mainContextProbes.delete(tabId);
+      }
+    }
+  };
 
   chromeApi.debugger.onEvent.addListener((source, method, params) => {
     if (typeof source.tabId !== "number") {
+      return;
+    }
+    const mainContextProbe = mainContextProbes.get(source.tabId);
+    if (
+      method === "Runtime.bindingCalled" &&
+      source.sessionId === undefined &&
+      mainContextProbe &&
+      attachmentTokens.get(source.tabId) === mainContextProbe.attachmentToken &&
+      policy.epochIsCurrent(source.tabId, mainContextProbe.accessEpoch) &&
+      params?.name === mainContextProbe.bindingName &&
+      params?.payload === "" &&
+      typeof params.executionContextId === "number"
+    ) {
+      mainContextProbe.contextId = params.executionContextId;
       return;
     }
     const accessEpoch = attachedAccessEpochs.get(source.tabId);
@@ -40,6 +104,9 @@ export function registerTabAccessEvents({
     }
     attachedTabs.delete(source.tabId);
     attachedAccessEpochs.delete(source.tabId);
+    attachmentTokens.delete(source.tabId);
+    mainContextProbes.delete(source.tabId);
+    forgetUtilityWorld(source.tabId);
     send({ type: "detached", tabId: source.tabId, reason });
     if (reason !== "canceled_by_user") {
       return;
@@ -67,6 +134,9 @@ export function registerTabAccessEvents({
       policy.invalidateTab(tabId);
       attachedTabs.delete(tabId);
       attachedAccessEpochs.delete(tabId);
+      attachmentTokens.delete(tabId);
+      mainContextProbes.delete(tabId);
+      forgetUtilityWorld(tabId);
       scheduleTabsSync();
       await policy.forgetTab(tabId).catch(() => undefined);
     })();
@@ -77,6 +147,9 @@ export function registerTabAccessEvents({
     policy.invalidateTab(removedTabId);
     attachedTabs.delete(removedTabId);
     attachedAccessEpochs.delete(removedTabId);
+    attachmentTokens.delete(removedTabId);
+    mainContextProbes.delete(removedTabId);
+    forgetUtilityWorld(removedTabId);
     scheduleTabsSync();
     void (async () => {
       try {
@@ -93,8 +166,9 @@ export function registerTabAccessEvents({
 
   chromeApi.tabs.onUpdated.addListener((tabId, changeInfo) => {
     scheduleTabsSync();
+    const urlChanged = typeof changeInfo.url === "string";
     if (
-      typeof changeInfo.url === "string" ||
+      urlChanged ||
       (policy.mode === ACCESS_MODE_SELECTED && typeof changeInfo.groupId === "number")
     ) {
       // Security contract: every URL change retires synchronous CDP authority.
@@ -120,7 +194,95 @@ export function registerTabAccessEvents({
         await detachDebugger(tabId);
       }
       if (attachedTabs.has(tabId) && attachedAccessEpochs.has(tabId)) {
+        if (!urlChanged) {
+          attachedAccessEpochs.set(tabId, eventEpoch);
+          return;
+        }
+        const attachmentToken = attachmentTokens.get(tabId);
+        const snapshot = await chromeApi.debugger
+          .sendCommand({ tabId }, "Page.getFrameTree")
+          .catch(() => undefined);
+        const frame = snapshot?.frameTree?.frame;
+        const frameUrl =
+          typeof frame?.url === "string" &&
+          (frame.urlFragment === undefined || typeof frame.urlFragment === "string")
+            ? `${frame.url}${frame.urlFragment ?? ""}`
+            : null;
+        if (
+          !attachmentToken ||
+          !attachmentIsCurrent(tabId, eventEpoch, attachmentToken) ||
+          typeof frame?.id !== "string" ||
+          typeof frame.loaderId !== "string" ||
+          frameUrl !== effectiveTabUrl(state.tab)
+        ) {
+          return;
+        }
+        const mainContextId = await probeMainContextId(tabId, eventEpoch, attachmentToken);
+        if (
+          !attachmentIsCurrent(tabId, eventEpoch, attachmentToken) ||
+          typeof mainContextId !== "number"
+        ) {
+          return;
+        }
+        const utilityWorldName = getUtilityWorldName(tabId);
+        const utilityContext =
+          typeof utilityWorldName === "string"
+            ? await chromeApi.debugger
+                .sendCommand({ tabId }, "Page.createIsolatedWorld", {
+                  frameId: frame.id,
+                  worldName: utilityWorldName,
+                  grantUniveralAccess: true,
+                })
+                .catch(() => undefined)
+            : undefined;
+        const utilityContextId = utilityContext?.executionContextId;
+        if (
+          !attachmentIsCurrent(tabId, eventEpoch, attachmentToken) ||
+          (utilityWorldName !== undefined && typeof utilityContextId !== "number")
+        ) {
+          return;
+        }
         attachedAccessEpochs.set(tabId, eventEpoch);
+        const contextOrigin = typeof frame.securityOrigin === "string" ? frame.securityOrigin : "";
+        // Reconstruct only Chrome's proven current state, never pre-proof event payloads.
+        send({
+          type: "cdpEvent",
+          tabId,
+          method: "Page.frameNavigated",
+          params: { frame, type: "Navigation" },
+        });
+        send({
+          type: "cdpEvent",
+          tabId,
+          method: "Runtime.executionContextCreated",
+          params: {
+            context: {
+              id: mainContextId,
+              origin: contextOrigin,
+              name: "",
+              auxData: { frameId: frame.id, isDefault: true, type: "default" },
+            },
+          },
+        });
+        if (typeof utilityWorldName === "string" && typeof utilityContextId === "number") {
+          send({
+            type: "cdpEvent",
+            tabId,
+            method: "Runtime.executionContextCreated",
+            params: {
+              context: {
+                id: utilityContextId,
+                origin: contextOrigin,
+                name: utilityWorldName,
+                auxData: { frameId: frame.id, isDefault: false, type: "isolated" },
+              },
+            },
+          });
+        }
+        // Enabling lifecycle events makes Chromium emit milestones already reached.
+        await chromeApi.debugger
+          .sendCommand({ tabId }, "Page.setLifecycleEventsEnabled", { enabled: true })
+          .catch(() => undefined);
       }
     })();
   });

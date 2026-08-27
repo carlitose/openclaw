@@ -13,4 +13,5 @@ export function createRelayCommandHandler(params: {
     tabId: number,
     epoch: TabAccessEpoch,
   ) => Promise<AccessibleBrowserTabSnapshot>;
+  rememberUtilityWorld: (tabId: number, worldName: string) => void;
 }): (message: Record<string, unknown>) => Promise<void>;
