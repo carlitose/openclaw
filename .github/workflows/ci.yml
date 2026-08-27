@@ -2047,7 +2047,11 @@ jobs:
               pnpm check:max-lines-ratchet --base "$base_ref"
               pnpm check:assertion-safety --base "$base_ref"
               if [[ "${RATCHET_RELEASE_MERGE_TREE:-}" == "true" ]]; then
-                node --import tsx scripts/run-oxlint-shards.mts --only=core --only=extensions --threads=1
+                export GOMAXPROCS=2
+                for stripe in 1 2 3 4 5; do
+                  node --import tsx scripts/run-oxlint-shards.mts --only=core --split-core --core-stripe="${stripe}/5" --threads=1
+                done
+                node --import tsx scripts/run-oxlint-shards.mts --only=extensions --threads=1
               fi
               ;;
             bun-launcher)
