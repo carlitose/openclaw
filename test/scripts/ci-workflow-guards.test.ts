@@ -6633,9 +6633,15 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
     expect(checksFastRun.run).toContain(
       'if [[ "${RATCHET_RELEASE_MERGE_TREE:-}" == "true" ]]; then',
     );
+    expect(checksFastRun.run).toContain("export GOMAXPROCS=2");
+    expect(checksFastRun.run).toContain("for stripe in 1 2 3 4 5; do");
     expect(checksFastRun.run).toContain(
-      "node --import tsx scripts/run-oxlint-shards.mts --only=core --only=extensions --split-core --threads=1",
+      'node --import tsx scripts/run-oxlint-shards.mts --only=core --split-core --core-stripe="${stripe}/5" --threads=1',
     );
+    expect(checksFastRun.run).toContain(
+      "node --import tsx scripts/run-oxlint-shards.mts --only=extensions --threads=1",
+    );
+    expect(checksFastRun.run).not.toContain("--only=core --only=extensions");
     expect(checksFastRun.run).not.toContain(
       "node scripts/run-oxlint.mjs src ui/src packages extensions",
     );
