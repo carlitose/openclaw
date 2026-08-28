@@ -17,6 +17,10 @@ export type TabAccessEventsChromeApi = {
     onDetach: ChromeEvent<(source: { tabId?: number }, reason: string) => void>;
   };
   tabs: {
+    get(tabId: number): Promise<import("./tab-eligibility.js").BrowserTabSnapshot>;
+    onCreated: ChromeEvent<
+      (tab: import("./tab-eligibility.js").BrowserTabSnapshot & { openerTabId?: number }) => void
+    >;
     onRemoved: ChromeEvent<(tabId: number) => void>;
     onReplaced: ChromeEvent<(addedTabId: number, removedTabId: number) => void>;
     onUpdated: ChromeEvent<(tabId: number, changeInfo: { groupId?: number; url?: string }) => void>;
@@ -45,6 +49,9 @@ export function registerTabAccessEvents(options: {
   chromeApi?: TabAccessEventsChromeApi;
   accessReady: Promise<unknown>;
   policy: TabAccessEventPolicy;
+  isTabInOpenClawGroup(
+    tab: import("./tab-eligibility.js").BrowserTabSnapshot,
+  ): boolean | Promise<boolean>;
   attachedTabs: Set<number>;
   attachedAccessEpochs: Map<number, TabAccessEpoch>;
   attachmentTokens: Map<number, symbol>;
@@ -54,6 +61,7 @@ export function registerTabAccessEvents(options: {
   detachDebugger(tabId: number): Promise<void>;
   pauseTab(tabId: number): void | Promise<void>;
   removeTabFromOpenClawGroup(tabId: number): void | Promise<void>;
+  placeTabInGroup(tabId: number, groupId: number): Promise<void>;
   runAccessMutation(task: () => void | Promise<void>): Promise<void>;
   getUtilityWorldName(tabId: number): string | undefined;
   forgetUtilityWorld(tabId: number): void;

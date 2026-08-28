@@ -153,7 +153,11 @@ function runAccessMutation(task) {
 // Tab group management (selected-mode ACL; all-mode ownership marker)
 // ---------------------------------------------------------------------------
 
-async function addTabToOpenClawGroup(tabId) {
+async function addTabToOpenClawGroup(tabId, exactGroupId) {
+  if (Number.isSafeInteger(exactGroupId) && exactGroupId >= 0) {
+    await chrome.tabs.group({ tabIds: [tabId], groupId: exactGroupId });
+    return;
+  }
   const tab = await chrome.tabs.get(tabId);
   const groups = await findOpenClawGroups();
   const sameWindowGroup = groups.find((group) => group.windowId === tab.windowId);
@@ -646,6 +650,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => handlePopupMessage
 registerTabAccessEvents({
   accessReady: tabAccessReady,
   policy: tabAccessPolicy,
+  isTabInOpenClawGroup: isTabSelected,
   attachedTabs,
   attachedAccessEpochs,
   attachmentTokens,
@@ -655,6 +660,7 @@ registerTabAccessEvents({
   detachDebugger,
   pauseTab,
   removeTabFromOpenClawGroup,
+  placeTabInGroup: (tabId, groupId) => addTabToOpenClawGroup(tabId, groupId),
   runAccessMutation,
   getUtilityWorldName: (tabId) => utilityWorldNames.get(tabId),
   forgetUtilityWorld: (tabId) => utilityWorldNames.delete(tabId),
