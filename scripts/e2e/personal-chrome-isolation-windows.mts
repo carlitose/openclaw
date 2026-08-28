@@ -24,8 +24,11 @@ import {
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const entrypoint = path.join(repoRoot, "openclaw.mjs");
-const extensionSource = path.join(repoRoot, "dist", "extensions", "browser", "chrome-extension");
+const runtimeRoot = process.env.OPENCLAW_ISOLATION_RUNTIME_ROOT?.trim()
+  ? path.resolve(process.env.OPENCLAW_ISOLATION_RUNTIME_ROOT)
+  : repoRoot;
+const entrypoint = path.join(runtimeRoot, "openclaw.mjs");
+const extensionSource = path.join(runtimeRoot, "dist", "extensions", "browser", "chrome-extension");
 // Source-checkout CLI startup on Windows includes the complete bundled plugin graph and
 // virus-scanner inspection. Keep that process cap separate from browser readiness deadlines.
 const WINDOWS_CLI_PROCESS_TIMEOUT_MS = 120_000;
@@ -244,6 +247,12 @@ async function gatewayRelayDiagnosticError(gatewayLogPath: string, cause: unknow
 async function main(): Promise<void> {
   if (process.platform !== "win32") {
     throw new Error("the native disposable-Chrome lane requires Windows");
+  }
+  const runtimeManifest = JSON.parse(
+    await fs.readFile(path.join(runtimeRoot, "package.json"), "utf8"),
+  ) as { name?: unknown };
+  if (runtimeManifest.name !== "openclaw") {
+    throw new Error("the native disposable-Chrome lane requires an OpenClaw runtime root");
   }
   await withPersonalChromeIsolationTask({}, async (task) => {
     assertNoForeignChromeProcesses({
@@ -521,6 +530,7 @@ async function main(): Promise<void> {
           return {
             ok: true,
             claim: "native-disposable-mv3",
+            runtime: runtimeRoot === repoRoot ? "source-build" : "packed-install",
             chromeForTestingVersion: chromeInstall.version,
             chromeForTestingSha256: chromeInstall.sha256,
             extensionId,

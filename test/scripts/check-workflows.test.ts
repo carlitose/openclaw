@@ -268,4 +268,23 @@ describe("check-workflows", () => {
     expect(workflow).toContain("if: ${{ always() && !cancelled() }}");
     expect(workflow).toContain("if: ${{ always() && !cancelled() && inputs.require_wsl2 }}");
   });
+
+  it("runs personal Chrome isolation from an exact packaged Windows candidate", () => {
+    const workflow = readFileSync(".github/workflows/windows-testbox-probe.yml", "utf8");
+
+    expect(workflow).toContain("run_personal_chrome_isolation:");
+    expect(workflow).toContain(
+      'description: "Build the canonical package and run native disposable Chrome isolation"',
+    );
+    expect(workflow).toContain('if [[ ! "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]');
+    expect(workflow).toContain('observed_head="$(git rev-parse HEAD)"');
+    expect(workflow).toContain("node scripts/package-openclaw-for-docker.mjs");
+    expect(workflow).toContain("--output-name openclaw-current.tgz");
+    expect(workflow).toContain("npm install \\");
+    expect(workflow).toContain('--prefix "$runtime_dir"');
+    expect(workflow).toContain("OPENCLAW_ISOLATION_RUNTIME_ROOT=$runtime_root");
+    expect(workflow).toContain("pnpm test:e2e:personal-chrome-isolation:windows");
+    expect(workflow).toContain("personal-chrome-windows-${{ github.run_id }}");
+    expect(workflow).toContain("Refusing to remove package runtime outside RUNNER_TEMP");
+  });
 });
