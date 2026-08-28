@@ -499,16 +499,19 @@ async function main(): Promise<void> {
           if (!deniedOpenError) {
             throw new Error("denied hostname unexpectedly opened through the OpenClaw CLI");
           }
-          const commandError = deniedOpenError as Error & { stderr?: unknown; stdout?: unknown };
+          const commandError =
+            deniedOpenError instanceof Error
+              ? deniedOpenError
+              : new Error("denied hostname failed with a non-Error rejection");
           const deniedOpenDiagnostic = [
             commandError.message,
-            commandError.stderr,
-            commandError.stdout,
+            "stderr" in commandError ? commandError.stderr : undefined,
+            "stdout" in commandError ? commandError.stdout : undefined,
           ]
             .filter((value): value is string => typeof value === "string")
             .join("\n");
           if (!/(?:blocked|denied|navigation policy|ssrf)/iu.test(deniedOpenDiagnostic)) {
-            throw deniedOpenError;
+            throw commandError;
           }
           const deniedOpenOutcome = "visible-policy-denial";
 
