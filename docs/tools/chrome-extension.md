@@ -104,6 +104,35 @@ openclaw config set browser.defaultProfile chrome
 }
 ```
 
+By default, an extension profile only waits for Chrome to connect. To let a
+browser request open one exact existing Chrome profile when it is disconnected,
+configure both its user-data root and Chrome profile directory:
+
+```json5
+{
+  browser: {
+    profiles: {
+      personal: {
+        driver: "extension",
+        userDataDir: "C:\\Users\\operator\\AppData\\Local\\Google\\Chrome\\User Data",
+        profileDirectory: "Profile 3",
+        // executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      },
+    },
+  },
+}
+```
+
+`profileDirectory` is the directory name Chrome uses, commonly `Default` or
+`Profile 3`, not the profile's display label. OpenClaw passes only that exact
+selection to the discovered or configured Chromium executable, then waits for
+the same profile's authenticated relay. It does not copy the profile, create a
+managed fallback, include pairing material in launch arguments, or retain a
+process handle that could stop or restart personal Chrome. Launch requires the
+current interactive desktop session; a background service cannot create a
+visible Windows session. On Windows, extension installation and pairing remain
+manual.
+
 Fresh automatic pairings use **All tabs**. Existing valid pairings are never
 overwritten, and older pairings keep their stored access mode.
 
@@ -314,6 +343,14 @@ openclaw doctor
   service is running for local setup, or confirm the browser node is running
   for browser-node setup. Then run browser doctor. No separate browser prewarm
   should be necessary.
+- **Profile not configured:** set both `userDataDir` and `profileDirectory`, or
+  open Chrome manually. OpenClaw never guesses among personal profiles.
+- **Extension not installed / profile ambiguous:** install exactly one trusted
+  Store or approved unpacked OpenClaw extension in the configured Chrome
+  profile.
+- **Chrome launch failed / relay timeout:** run `openclaw doctor`, verify that
+  the Gateway is in the interactive desktop session, then check the extension
+  popup and pairing state.
 
 See [Browser](/tools/browser) for the full profile model and the managed
 `openclaw` and Chrome MCP `user` profiles.

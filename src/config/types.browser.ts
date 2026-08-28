@@ -7,8 +7,10 @@ export type BrowserProfileConfig = {
   cdpPort?: number;
   /** CDP/DevTools endpoint URL for this profile (remote CDP or existing-session endpoint attach). */
   cdpUrl?: string;
-  /** Explicit user data directory for existing-session Chrome MCP attachment. */
+  /** Explicit user data directory for existing-session attachment or extension-profile launch. */
   userDataDir?: string;
+  /** Exact Chrome profile directory (for example `Default`) within an extension profile's userDataDir. */
+  profileDirectory?: string;
   /** Override the Chrome MCP command for existing-session profiles. */
   mcpCommand?: string;
   /** Extra Chrome MCP arguments for existing-session profiles. */
@@ -20,7 +22,7 @@ export type BrowserProfileConfig = {
   driver?: "openclaw" | "clawd" | "existing-session" | "extension";
   /** If true, launch this profile in headless mode. Falls back to browser.headless. */
   headless?: boolean;
-  /** Browser executable path for this profile. Falls back to browser.executablePath. */
+  /** Browser executable path for managed or configured extension-profile launch. Falls back to browser.executablePath. */
   executablePath?: string;
   /** If true, never launch a browser for this profile; only attach. Falls back to browser.attachOnly. */
   attachOnly?: boolean;

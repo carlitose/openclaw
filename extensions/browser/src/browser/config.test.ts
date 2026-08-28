@@ -158,6 +158,26 @@ describe("browser config", () => {
     expect(resolveProfile(resolved, "work")?.cdpPort).toBe(20123);
   });
 
+  it("resolves the exact personal Chrome profile selected for extension launch", () => {
+    const resolved = resolveBrowserConfig({
+      profiles: {
+        personal: {
+          driver: "extension",
+          userDataDir: "~/Chrome Data",
+          profileDirectory: "Profile 3",
+        },
+      },
+    });
+
+    expect(resolveProfile(resolved, "personal")).toEqual(
+      expect.objectContaining({
+        driver: "extension",
+        userDataDir: resolveUserPath("~/Chrome Data"),
+        profileDirectory: "Profile 3",
+      }),
+    );
+  });
+
   it("keeps literal $ patterns in home when expanding a tilde executable path", () => {
     const spy = vi.spyOn(os, "homedir").mockReturnValue("/home/$&user");
     try {

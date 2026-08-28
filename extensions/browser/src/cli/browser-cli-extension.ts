@@ -3,9 +3,9 @@
  * native bootstrap host, and retain advanced manual pairing.
  */
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Command } from "commander";
 import {
+  BUNDLED_CHROME_EXTENSION_DIR,
   browserExtensionStatus,
   FOUNDATION_CHROME_WEB_STORE_URL,
   installChromeExtensionBootstrap,
@@ -40,9 +40,7 @@ function resolveChromeExtensionDir(pluginRoot?: string): string {
   if (pluginRoot) {
     return path.join(pluginRoot, "chrome-extension");
   }
-  // extensions/browser/dist/cli/ -> extensions/browser/chrome-extension
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(here, "..", "..", "chrome-extension");
+  return BUNDLED_CHROME_EXTENSION_DIR;
 }
 
 function resolveBrowserPluginRoot(pluginRoot?: string): string {

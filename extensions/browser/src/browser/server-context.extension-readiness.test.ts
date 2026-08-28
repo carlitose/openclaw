@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "./server-context.chrome-test-harness.js";
 import * as chromeModule from "./chrome.js";
+import { BROWSER_ERROR_REASONS } from "./errors.js";
 import { ExtensionRelayBridge } from "./extension-relay/relay-bridge.js";
 import type { ExtensionRelayHandle } from "./extension-relay/relay-server.js";
 import { createBrowserRouteContext } from "./server-context.js";
@@ -11,6 +12,9 @@ import type { BrowserServerState } from "./server-context.types.js";
 const relayMocks = vi.hoisted(() => ({
   ensureExtensionRelayForProfile: vi.fn(),
 }));
+const launchMocks = vi.hoisted(() => ({
+  ensureExtensionProfileLaunched: vi.fn(),
+}));
 
 vi.mock("./extension-relay.runtime.js", () => ({
   getExtensionRelayModule: async () => ({
@@ -19,13 +23,20 @@ vi.mock("./extension-relay.runtime.js", () => ({
   }),
 }));
 
-function createExtensionProfile() {
+vi.mock("./extension-profile-launch.runtime.js", () => ({
+  getExtensionProfileLaunchModule: async () => ({
+    ensureExtensionProfileLaunched: launchMocks.ensureExtensionProfileLaunched,
+  }),
+}));
+
+function createExtensionProfile(overrides: Partial<ReturnType<typeof makeBrowserProfile>> = {}) {
   const profile = makeBrowserProfile({
     name: "chrome",
     cdpPort: 18799,
     cdpUrl: "http://127.0.0.1:18799",
     driver: "extension",
     attachOnly: true,
+    ...overrides,
   });
   const state = makeBrowserServerState({
     profile,
@@ -102,12 +113,63 @@ describe("extension profile readiness", () => {
     const unavailable = browser.profile.ensureBrowserAvailable().catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(8_500);
 
-    expect(await unavailable).toEqual(expect.objectContaining({ message: expect.any(String) }));
+    expect(await unavailable).toMatchObject({
+      metadata: {
+        reason: BROWSER_ERROR_REASONS.profileNotConfigured,
+        details: { profile: "chrome" },
+      },
+    });
     expect((await unavailable) as Error).toHaveProperty(
       "message",
       expect.stringContaining("Pair the browser extension."),
     );
     expect(chromeModule.isChromeReachable).not.toHaveBeenCalled();
+    browser.dispose();
+  });
+
+  it("opens an explicitly selected Chrome profile and waits for its exact relay", async () => {
+    vi.mocked(chromeModule.isChromeReachable).mockResolvedValue(false);
+    const browser = createExtensionProfile({
+      userDataDir: "C:\\Users\\operator\\Chrome Data",
+      profileDirectory: "Profile 3",
+    });
+    launchMocks.ensureExtensionProfileLaunched.mockImplementationOnce(async () => {
+      vi.mocked(chromeModule.isChromeReachable).mockResolvedValue(true);
+      browser.connect();
+    });
+
+    await expect(browser.profile.ensureBrowserAvailable()).resolves.toBeUndefined();
+    expect(launchMocks.ensureExtensionProfileLaunched).toHaveBeenCalledOnce();
+    expect(launchMocks.ensureExtensionProfileLaunched).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profile: expect.objectContaining({
+          name: "chrome",
+          userDataDir: "C:\\Users\\operator\\Chrome Data",
+          profileDirectory: "Profile 3",
+        }),
+      }),
+    );
+    browser.dispose();
+  });
+
+  it("reports a typed relay timeout after configured Chrome opens without pairing", async () => {
+    vi.useFakeTimers();
+    vi.mocked(chromeModule.isChromeReachable).mockResolvedValue(false);
+    launchMocks.ensureExtensionProfileLaunched.mockResolvedValueOnce(undefined);
+    const browser = createExtensionProfile({
+      userDataDir: "C:\\Users\\operator\\Chrome Data",
+      profileDirectory: "Default",
+    });
+
+    const unavailable = browser.profile.ensureBrowserAvailable().catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(browser.state.resolved.localLaunchTimeoutMs + 100);
+
+    expect(await unavailable).toMatchObject({
+      metadata: {
+        reason: BROWSER_ERROR_REASONS.relayTimeout,
+        details: { profile: "chrome" },
+      },
+    });
     browser.dispose();
   });
 

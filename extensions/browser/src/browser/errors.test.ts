@@ -63,3 +63,31 @@ describe("no-display browser errors", () => {
     ).toEqual({ error: "display required" });
   });
 });
+
+describe("extension profile availability errors", () => {
+  it.each([
+    BROWSER_ERROR_REASONS.chromeLaunchFailed,
+    BROWSER_ERROR_REASONS.extensionNotInstalled,
+    BROWSER_ERROR_REASONS.profileAmbiguous,
+    BROWSER_ERROR_REASONS.profileNotConfigured,
+    BROWSER_ERROR_REASONS.relayTimeout,
+  ])("preserves the closed %s reason without path details", (reason) => {
+    const error = new BrowserProfileUnavailableError("safe operator guidance", {
+      metadata: { reason, details: { profile: "personal" } },
+    });
+
+    expect(toBrowserErrorResponse(error)).toEqual({
+      status: 409,
+      message: "safe operator guidance",
+      reason,
+      details: { profile: "personal" },
+    });
+    expect(
+      parseBrowserErrorPayload({
+        error: error.message,
+        reason,
+        details: { profile: "personal", userDataDir: "must-not-pass" },
+      }),
+    ).toEqual({ error: error.message, reason, details: { profile: "personal" } });
+  });
+});
