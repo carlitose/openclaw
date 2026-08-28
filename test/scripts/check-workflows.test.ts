@@ -280,6 +280,13 @@ describe("check-workflows", () => {
     expect(workflow).toContain('observed_head="$(git rev-parse HEAD)"');
     expect(workflow).toContain("node scripts/package-openclaw-for-docker.mjs");
     expect(workflow).toContain("--output-name openclaw-current.tgz");
+    expect(workflow).toContain("name: personal-chrome-package-${{ github.run_id }}");
+    expect(workflow).toContain(
+      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+    );
+    expect(workflow).toContain('observed_package_sha256="$(sha256sum');
+    expect(workflow).toContain('"$packaged_head" != "$OPENCLAW_ISOLATION_CANDIDATE_SHA"');
+    expect(workflow).toContain('"$observed_package_sha256" != "$package_sha256"');
     expect(workflow).toContain("npm install \\");
     expect(workflow).toContain('--prefix "$runtime_dir"');
     expect(workflow).toContain("OPENCLAW_ISOLATION_RUNTIME_ROOT=$runtime_root");

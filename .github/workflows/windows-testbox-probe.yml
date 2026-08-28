@@ -55,8 +55,65 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  personal_chrome_package:
+    name: Freeze personal Chrome package
+    if: ${{ inputs.run_personal_chrome_isolation }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout frozen candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.target_ref }}
+          persist-credentials: false
+          submodules: false
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm-store-cache
+        with:
+          cache-mode: restore
+          node-version: 22.x
+
+      - name: Build canonical package
+        env:
+          CI: true
+          EXPECTED_HEAD: ${{ inputs.target_ref }}
+          NODE_OPTIONS: --max-old-space-size=8192
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Personal Chrome isolation requires target_ref to be an exact 40-character commit SHA." >&2
+            exit 1
+          fi
+          observed_head="$(git rev-parse HEAD)"
+          if [[ "$observed_head" != "$EXPECTED_HEAD" ]]; then
+            echo "Checked out $observed_head, expected frozen target $EXPECTED_HEAD." >&2
+            exit 1
+          fi
+          pnpm install --frozen-lockfile --prefer-offline --ignore-scripts=false --config.engine-strict=false --config.enable-pre-post-scripts=true --config.side-effects-cache=true
+          package_dir="$GITHUB_WORKSPACE/.artifacts/personal-chrome-package"
+          mkdir -p "$package_dir"
+          node scripts/package-openclaw-for-docker.mjs \
+            --source-dir "$GITHUB_WORKSPACE" \
+            --allow-unreleased-changelog \
+            --output-dir "$package_dir" \
+            --output-name openclaw-current.tgz
+          package_sha256="$(sha256sum "$package_dir/openclaw-current.tgz" | cut -d ' ' -f 1)"
+          printf '%s\n' "$observed_head" > "$package_dir/candidate.sha"
+          printf '%s\n' "$package_sha256" > "$package_dir/package.sha256"
+
+      - name: Upload frozen package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: personal-chrome-package-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/personal-chrome-package/
+          if-no-files-found: error
+          retention-days: 7
+
   probe:
     name: Windows probe
+    needs: personal_chrome_package
+    if: ${{ always() && (needs.personal_chrome_package.result == 'success' || needs.personal_chrome_package.result == 'skipped') }}
     runs-on: ${{ inputs.runner_label }}
     timeout-minutes: 75
     defaults:
@@ -292,7 +349,14 @@ jobs:
           fi
           echo "OPENCLAW_ISOLATION_CANDIDATE_SHA=$observed_head" >> "$GITHUB_ENV"
 
-      - name: Build and install personal Chrome package candidate
+      - name: Download personal Chrome package candidate
+        if: ${{ inputs.run_personal_chrome_isolation }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: personal-chrome-package-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/personal-chrome-package
+
+      - name: Verify and install personal Chrome package candidate
         if: ${{ inputs.run_personal_chrome_isolation }}
         shell: bash
         env:
@@ -303,12 +367,19 @@ jobs:
           export PATH="$NODE_BIN:$PATH"
           package_dir="$GITHUB_WORKSPACE/.artifacts/personal-chrome-package"
           runtime_dir="$RUNNER_TEMP/openclaw-personal-chrome-runtime-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          mkdir -p "$package_dir" "$runtime_dir"
-          node scripts/package-openclaw-for-docker.mjs \
-            --source-dir "$GITHUB_WORKSPACE" \
-            --allow-unreleased-changelog \
-            --output-dir "$package_dir" \
-            --output-name openclaw-current.tgz
+          mkdir -p "$runtime_dir"
+          packaged_head="$(tr -d '\r\n' < "$package_dir/candidate.sha")"
+          package_sha256="$(tr -d '\r\n' < "$package_dir/package.sha256")"
+          observed_package_sha256="$(sha256sum "$package_dir/openclaw-current.tgz" | cut -d ' ' -f 1)"
+          if [[ "$packaged_head" != "$OPENCLAW_ISOLATION_CANDIDATE_SHA" ]]; then
+            echo "Package candidate $packaged_head does not match frozen checkout $OPENCLAW_ISOLATION_CANDIDATE_SHA." >&2
+            exit 1
+          fi
+          if [[ ! "$package_sha256" =~ ^[0-9a-f]{64}$ || "$observed_package_sha256" != "$package_sha256" ]]; then
+            echo "Downloaded package SHA-256 did not match its frozen evidence." >&2
+            exit 1
+          fi
+          echo "OPENCLAW_ISOLATION_PACKAGE_SHA256=$package_sha256" >> "$GITHUB_ENV"
           npm install \
             --prefix "$runtime_dir" \
             --no-audit \
@@ -336,7 +407,8 @@ jobs:
         with:
           name: personal-chrome-windows-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            .artifacts/personal-chrome-package/openclaw-current.tgz
+            .artifacts/personal-chrome-package/candidate.sha
+            .artifacts/personal-chrome-package/package.sha256
             .artifacts/personal-chrome-windows/run.log
           if-no-files-found: error
           retention-days: 7

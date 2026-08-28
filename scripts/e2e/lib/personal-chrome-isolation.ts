@@ -1,5 +1,5 @@
 import { execFile, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import http, { type Server } from "node:http";
 import os from "node:os";
@@ -26,7 +26,19 @@ type FixtureUrls = {
   challenge: string;
   denied: string;
   unrelated: string;
+  humanBoundaries: Record<HumanBoundaryKind, string>;
 };
+
+const HUMAN_BOUNDARY_KINDS = [
+  "password",
+  "otp-2fa",
+  "captcha",
+  "passkey",
+  "new-consent",
+  "account-ambiguity",
+] as const;
+
+type HumanBoundaryKind = (typeof HUMAN_BOUNDARY_KINDS)[number];
 
 type PersonalChromeFixtures = {
   port: number;
@@ -116,6 +128,29 @@ function defaultProtectedPaths(): string[] {
     path.join(home, ".openclaw"),
     ...chromeProductRoots({ env: process.env, homeDir: home }).map((root) => root.userDataDir),
   ].filter((value): value is string => Boolean(value));
+}
+
+async function snapshotProtectedPathMetadata(protectedPaths: readonly string[]): Promise<string> {
+  const entries = [];
+  for (const protectedPath of protectedPaths.map(normalizedPath).toSorted()) {
+    try {
+      const stat = await fs.lstat(protectedPath);
+      entries.push({
+        path: protectedPath,
+        state: "present",
+        mode: stat.mode,
+        size: stat.size,
+        modifiedMs: stat.mtimeMs,
+        changedMs: stat.ctimeMs,
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+      entries.push({ path: protectedPath, state: "absent" });
+    }
+  }
+  return createHash("sha256").update(JSON.stringify(entries)).digest("hex");
 }
 
 async function allocateGatewayPort(): Promise<number> {
@@ -374,16 +409,20 @@ async function waitForPortRelease(port: number): Promise<void> {
 }
 
 function fixtureUrls(port: number): FixtureUrls {
-  const url = (pathname: string) => `http://127.0.0.1:${port}${pathname}`;
+  const allowedUrl = (pathname: string) => `http://localhost:${port}${pathname}`;
+  const deniedUrl = (pathname: string) => `http://127.0.0.1:${port}${pathname}`;
   return {
-    root: url("/root"),
-    child: url("/child"),
-    popup: url("/popup"),
-    redirect: url("/redirect"),
-    redirectFinal: url("/final"),
-    challenge: url("/challenge"),
-    denied: url("/denied"),
-    unrelated: url("/unrelated"),
+    root: allowedUrl("/root"),
+    child: allowedUrl("/child"),
+    popup: allowedUrl("/popup"),
+    redirect: allowedUrl("/redirect"),
+    redirectFinal: allowedUrl("/final"),
+    challenge: allowedUrl("/challenge"),
+    denied: deniedUrl("/denied"),
+    unrelated: deniedUrl("/unrelated"),
+    humanBoundaries: Object.fromEntries(
+      HUMAN_BOUNDARY_KINDS.map((kind) => [kind, allowedUrl(`/human-boundary/${kind}`)]),
+    ) as Record<HumanBoundaryKind, string>,
   };
 }
 
@@ -406,7 +445,7 @@ async function startFixtureServer(artifactsDir: string): Promise<{
       if (requestUrl.pathname === "/root") {
         response.setHeader("content-type", "text/html; charset=utf-8");
         response.end(
-          `<a id="child" href="${urls.child}" target="_blank" rel="opener">child</a><button id="popup" onclick="window.open('${urls.popup}', 'openclaw-popup', 'popup,width=480,height=320')">popup</button>`,
+          `<a id="child" href="${urls.child}" target="_blank" rel="opener">child</a><button id="popup" onclick="window.open('${urls.popup}', 'openclaw-popup', 'popup,width=480,height=320')">popup</button><a id="denied-child" href="${urls.denied}" target="_blank" rel="opener">denied child</a>`,
         );
         return;
       }
@@ -427,6 +466,14 @@ async function startFixtureServer(artifactsDir: string): Promise<{
       }
       if (requestUrl.pathname === "/unrelated") {
         response.end("unrelated tab");
+        return;
+      }
+      const humanBoundary = /^\/human-boundary\/(.+)$/u.exec(requestUrl.pathname)?.[1];
+      if (HUMAN_BOUNDARY_KINDS.some((kind) => kind === humanBoundary)) {
+        response.setHeader("content-type", "text/html; charset=utf-8");
+        response.end(
+          `<main><h1>Human action required</h1><p data-boundary="${humanBoundary}">${humanBoundary}</p></main>`,
+        );
         return;
       }
       response.end(`fixture ${requestUrl.pathname}`);
@@ -495,12 +542,14 @@ export async function createPersonalChromeIsolationTask(
     chromeForTestingDir,
     artifactsDir,
   ];
+  const protectedPaths = options.protectedPaths ?? defaultProtectedPaths();
+  const protectedMetadataBefore = await snapshotProtectedPathMetadata(protectedPaths);
 
   try {
     assertIsolatedBrowserPaths({
       taskRoot: state.root,
       candidatePaths: ownedPaths,
-      protectedPaths: options.protectedPaths ?? defaultProtectedPaths(),
+      protectedPaths,
     });
     await Promise.all(
       [pairingDir, profileDir, chromeForTestingDir, artifactsDir].map(async (directory) => {
@@ -569,6 +618,14 @@ export async function createPersonalChromeIsolationTask(
       cleanupErrors.push(
         new Error("retained the temporary task root because task-owned Chrome cleanup failed"),
       );
+    }
+    try {
+      const protectedMetadataAfter = await snapshotProtectedPathMetadata(protectedPaths);
+      if (protectedMetadataAfter !== protectedMetadataBefore) {
+        throw new Error("protected OpenClaw or Chrome path metadata changed during isolation");
+      }
+    } catch (error) {
+      cleanupErrors.push(error);
     }
     if (cleanupErrors.length > 0) {
       throw new AggregateError(cleanupErrors, "personal Chrome isolation cleanup failed");

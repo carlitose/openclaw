@@ -116,10 +116,41 @@ describe("personal Chrome isolation harness", () => {
     ).toThrow(/escapes the task root/u);
   });
 
+  it("fails cleanup when protected-path metadata changes", async () => {
+    const sandbox = await fs.mkdtemp(path.join(process.cwd(), ".tmp-isolation-metadata-"));
+    cleanupTasks.push(async () => await fs.rm(sandbox, { recursive: true, force: true }));
+    const protectedFile = path.join(sandbox, "protected.txt");
+    await fs.writeFile(protectedFile, "first", "utf8");
+
+    await expect(
+      withPersonalChromeIsolationTask({ protectedPaths: [protectedFile] }, async () => {
+        await fs.writeFile(protectedFile, "changed-size", "utf8");
+      }),
+    ).rejects.toMatchObject({
+      errors: [
+        expect.objectContaining({
+          message: "protected OpenClaw or Chrome path metadata changed during isolation",
+        }),
+      ],
+    });
+  });
+
   it("serves all task-owned loopback fixtures and records requests", async () => {
     const task = await createPersonalChromeIsolationTask({ protectedPaths: [] });
     cleanupTasks.push(task.cleanup);
     const fixtures = await task.startFixtures();
+
+    expect(new URL(fixtures.urls.root).hostname).toBe("localhost");
+    expect(new URL(fixtures.urls.denied).hostname).toBe("127.0.0.1");
+    expect(new URL(fixtures.urls.unrelated).hostname).toBe("127.0.0.1");
+    expect(Object.keys(fixtures.urls.humanBoundaries)).toEqual([
+      "password",
+      "otp-2fa",
+      "captcha",
+      "passkey",
+      "new-consent",
+      "account-ambiguity",
+    ]);
 
     const root = await fetch(fixtures.urls.root);
     expect(root.status).toBe(200);
@@ -138,6 +169,11 @@ describe("personal Chrome isolation harness", () => {
     expect(denied.status).toBe(403);
     expect(await denied.text()).toContain("denied destination");
     expect(await (await fetch(fixtures.urls.unrelated)).text()).toContain("unrelated tab");
+    for (const [kind, url] of Object.entries(fixtures.urls.humanBoundaries)) {
+      const body = await (await fetch(url)).text();
+      expect(body).toContain("Human action required");
+      expect(body).toContain(`data-boundary="${kind}"`);
+    }
 
     const events = (await fs.readFile(fixtures.eventsPath, "utf8"))
       .trim()
