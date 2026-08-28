@@ -109,7 +109,7 @@ const repositoryScriptEntries = [
 // which Knip cannot follow in either direction.
 function listScriptShimEntries(dir = "scripts"): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const entryPath = path.join(dir, entry.name);
+    const entryPath = path.posix.join(dir, entry.name);
     if (entry.isDirectory()) {
       return listScriptShimEntries(entryPath);
     }
