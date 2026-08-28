@@ -7,7 +7,7 @@ function isValidTabId(value) {
 }
 
 /** Empty and about:blank children may bootstrap, but never become accessible. */
-function classifyDescendantNavigation(tab) {
+export function classifyDescendantNavigation(tab) {
   const rawUrl = effectiveTabUrl(tab);
   if (typeof rawUrl !== "string" || rawUrl.length === 0) {
     return "pending";
@@ -57,7 +57,11 @@ export function createDescendantTabContainment({
     if (!currentEntry(entry) || !policy.epochIsCurrent(entry.openerId, entry.openerEpoch)) {
       return false;
     }
-    const state = await policy.inspectTab(entry.openerId, entry.openerEpoch).catch(() => null);
+    // Local group custody remains available while the relay is offline. Relay
+    // navigation authority is checked separately before a child is published.
+    const state = await policy
+      .inspectTab(entry.openerId, entry.openerEpoch, { enforceNavigationPolicy: false })
+      .catch(() => null);
     let groupIsCurrent = false;
     if (state?.tab) {
       try {

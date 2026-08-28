@@ -39,9 +39,18 @@ export function reconnectDelayMs(attempt: number): number;
 
 export function nearestGroupColor(hex: unknown): string;
 
-export function toRelayTabInfo(tab: {
-  id: number;
-  url?: string;
-  title?: string;
-  active?: boolean;
-}): { tabId: number; url: string; title: string; active: boolean };
+export function toRelayTabInfo(
+  tab: {
+    id: number;
+    url?: string;
+    title?: string;
+    active?: boolean;
+  },
+  taskGeneration?: string,
+): {
+  tabId: number;
+  url: string;
+  title: string;
+  active: boolean;
+  taskGeneration?: string;
+};

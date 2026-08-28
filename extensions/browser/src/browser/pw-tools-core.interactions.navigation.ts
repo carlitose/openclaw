@@ -3,6 +3,7 @@ import { toErrorObject } from "../infra/errors.js";
 import { BROWSER_ACTION_NAVIGATION_GRACE_MS } from "./act-policy.js";
 import {
   assertBrowserNavigationResultAllowed,
+  hasBrowserNavigationPolicy,
   type BrowserNavigationPolicyOptions,
   withBrowserNavigationPolicy,
 } from "./navigation-guard.js";
@@ -38,12 +39,13 @@ export function interactionNavigationPolicy(
   opts: BrowserNavigationPolicyOptions,
 ): BrowserNavigationPolicyOptions {
   return withBrowserNavigationPolicy(opts.ssrfPolicy, {
+    navigationPolicy: opts.navigationPolicy,
     browserProxyMode: opts.browserProxyMode,
   });
 }
 
 export function hasInteractionNavigationPolicy(policy: BrowserNavigationPolicyOptions): boolean {
-  return Boolean(policy.ssrfPolicy || policy.browserProxyMode);
+  return hasBrowserNavigationPolicy(policy);
 }
 
 type NavigationObservablePage = Pick<Page, "url"> & {
@@ -152,7 +154,7 @@ async function assertSubframeNavigationAllowed(
   navigationPolicy: BrowserNavigationPolicyOptions,
 ): Promise<void> {
   if (
-    (!navigationPolicy.ssrfPolicy && !navigationPolicy.browserProxyMode) ||
+    !hasInteractionNavigationPolicy(navigationPolicy) ||
     (!frameUrl.startsWith("http://") && !frameUrl.startsWith("https://"))
   ) {
     // Non-network frame URLs like about:blank and about:srcdoc do not cross the

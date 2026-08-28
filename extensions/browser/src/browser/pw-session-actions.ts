@@ -491,6 +491,7 @@ export async function createPageViaPlaywright(
   const targetUrl = opts.url.trim() || "about:blank";
   if (targetUrl !== "about:blank") {
     const navigationPolicy = withBrowserNavigationPolicy(opts.ssrfPolicy, {
+      navigationPolicy: opts.navigationPolicy,
       browserProxyMode: opts.browserProxyMode,
     });
     await assertBrowserNavigationAllowed({
@@ -504,8 +505,7 @@ export async function createPageViaPlaywright(
         page,
         url: targetUrl,
         timeoutMs: 30_000,
-        ssrfPolicy: opts.ssrfPolicy,
-        browserProxyMode: opts.browserProxyMode,
+        ...navigationPolicy,
         targetId: createdTargetId ?? undefined,
       });
     } catch (err) {
@@ -522,8 +522,7 @@ export async function createPageViaPlaywright(
         cdpUrl: opts.cdpUrl,
         page,
         response,
-        ssrfPolicy: opts.ssrfPolicy,
-        browserProxyMode: opts.browserProxyMode,
+        ...navigationPolicy,
         targetId: createdTargetId ?? undefined,
       });
     } catch (err) {

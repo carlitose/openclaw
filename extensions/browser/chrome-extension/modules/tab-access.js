@@ -11,7 +11,7 @@ function isValidTabId(value) {
  * Owns access mode, durable browser-session pauses, and revocation epochs.
  * Every authority-bearing caller captures an epoch and checks through here.
  */
-export function createTabAccessPolicy({ chromeApi = chrome, isSelectedTab }) {
+export function createTabAccessPolicy({ chromeApi = chrome, isSelectedTab, classifyNavigation }) {
   const deniedTabIds = new Set();
   const tabRevisions = new Map();
   let mode = ACCESS_MODE_SELECTED;
@@ -40,13 +40,18 @@ export function createTabAccessPolicy({ chromeApi = chrome, isSelectedTab }) {
     }
   }
 
-  async function tabIsEligible(tab) {
-    return tabEligibility(tab, {
+  async function tabIsEligible(tab, { enforceNavigationPolicy = true } = {}) {
+    const eligible = tabEligibility(tab, {
       fileAccessAllowed:
         tab?.url?.startsWith("file:") || tab?.pendingUrl?.startsWith("file:")
           ? await fileAccessAllowed()
           : true,
     }).eligible;
+    if (!eligible || !classifyNavigation || !enforceNavigationPolicy) {
+      return eligible;
+    }
+    const decision = await Promise.resolve(classifyNavigation(tab));
+    return decision?.status === "allowed";
   }
 
   async function persistDeniedIds() {
@@ -175,7 +180,11 @@ export function createTabAccessPolicy({ chromeApi = chrome, isSelectedTab }) {
     invalidateTab(tabId);
   }
 
-  async function inspectTab(tabId, epoch = capture(tabId)) {
+  async function inspectTab(
+    tabId,
+    epoch = capture(tabId),
+    { enforceNavigationPolicy = true } = {},
+  ) {
     if (!isValidTabId(tabId)) {
       return { accessible: false, eligible: false, denied: false, reason: "missing", tab: null };
     }
@@ -207,6 +216,21 @@ export function createTabAccessPolicy({ chromeApi = chrome, isSelectedTab }) {
     if (!eligibility.eligible) {
       return { accessible: false, eligible: false, denied: false, reason: eligibility.reason, tab };
     }
+    if (classifyNavigation && enforceNavigationPolicy) {
+      const decision = await Promise.resolve(classifyNavigation(tab));
+      if (!epochIsCurrent(tabId, epoch)) {
+        return { accessible: false, eligible: false, denied: false, reason: "revoked", tab };
+      }
+      if (decision?.status !== "allowed") {
+        return {
+          accessible: false,
+          eligible: false,
+          denied: false,
+          reason: "navigation-policy",
+          tab,
+        };
+      }
+    }
     const denied = mode === ACCESS_MODE_ALL && deniedTabIds.has(tabId);
     const selected = mode === ACCESS_MODE_SELECTED ? await isSelectedTab(tab) : true;
     if (!epochIsCurrent(tabId, epoch)) {
@@ -222,7 +246,7 @@ export function createTabAccessPolicy({ chromeApi = chrome, isSelectedTab }) {
       if (!epochIsCurrent(tabId, epoch)) {
         return { accessible: false, eligible: false, denied, reason: "revoked", tab: current };
       }
-      const currentEligible = await tabIsEligible(current);
+      const currentEligible = await tabIsEligible(current, { enforceNavigationPolicy });
       if (!epochIsCurrent(tabId, epoch)) {
         return { accessible: false, eligible: false, denied, reason: "revoked", tab: current };
       }
@@ -268,6 +292,9 @@ export function createTabAccessPolicy({ chromeApi = chrome, isSelectedTab }) {
     }
     if (state.reason === "incognito") {
       throw new Error(`tab ${tabId} is incognito and unavailable to OpenClaw`);
+    }
+    if (state.reason === "navigation-policy") {
+      throw new Error(`tab ${tabId} is blocked by the browser profile navigation policy`);
     }
     throw new Error(`tab ${tabId} is restricted or unavailable to OpenClaw`);
   }
@@ -315,7 +342,13 @@ export function createTabAccessPolicy({ chromeApi = chrome, isSelectedTab }) {
       invalidateTab(tabId);
       throw error;
     }
-    if (!(await tabIsEligible(tab))) {
+    const eligibility = tabEligibility(tab, {
+      fileAccessAllowed:
+        tab?.url?.startsWith("file:") || tab?.pendingUrl?.startsWith("file:")
+          ? await fileAccessAllowed()
+          : true,
+    });
+    if (!eligibility.eligible) {
       deniedTabIds.delete(tabId);
       invalidateTab(tabId);
       throw new Error(`tab ${tabId} is restricted or unavailable to OpenClaw`);

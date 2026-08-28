@@ -6,6 +6,7 @@
  */
 import path from "node:path";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
+import { navigationPolicyIsEmpty } from "../../../chrome-extension/modules/navigation-policy.js";
 import { getImageMetadata } from "../../media/media-services.js";
 import { ensureMediaDir, saveMediaBuffer } from "../../media/store.js";
 import { resolveBrowserNavigationTimeoutMs } from "../act-policy.js";
@@ -331,6 +332,16 @@ function browserStateResponseFields(state: unknown): { browserState?: unknown } 
   return hasObservableBrowserState(state) ? { browserState: state } : {};
 }
 
+function hasSnapshotNavigationPolicy(
+  policy: ReturnType<typeof browserNavigationPolicyForProfile>,
+): boolean {
+  return Boolean(
+    policy.ssrfPolicy ||
+    policy.browserProxyMode ||
+    (policy.navigationPolicy && !navigationPolicyIsEmpty(policy.navigationPolicy)),
+  );
+}
+
 /** Register snapshot, screenshot, and navigation endpoints. */
 export function registerBrowserAgentSnapshotRoutes(
   app: BrowserRouteRegistrar,
@@ -474,7 +485,7 @@ export function registerBrowserAgentSnapshotRoutes(
             signal,
           };
           const ssrfPolicyOpts = browserNavigationPolicyForProfile(ctx, profileCtx);
-          if (ssrfPolicyOpts.ssrfPolicy) {
+          if (hasSnapshotNavigationPolicy(ssrfPolicyOpts)) {
             await assertBrowserNavigationResultAllowed({
               url: tab.url,
               ...ssrfPolicyOpts,
@@ -551,7 +562,7 @@ export function registerBrowserAgentSnapshotRoutes(
             const snap = await pw.snapshotRoleViaPlaywright({
               cdpUrl,
               targetId: tab.targetId,
-              ssrfPolicy: ctx.state().resolved.ssrfPolicy,
+              ...browserNavigationPolicyForProfile(ctx, profileCtx),
             });
             const labeled = await pw.screenshotWithLabelsViaPlaywright({
               cdpUrl,
@@ -641,7 +652,7 @@ export function registerBrowserAgentSnapshotRoutes(
             timeoutMs: plan.timeoutMs,
           });
           const ssrfPolicyOpts = browserNavigationPolicyForProfile(ctx, profileCtx);
-          if (ssrfPolicyOpts.ssrfPolicy) {
+          if (hasSnapshotNavigationPolicy(ssrfPolicyOpts)) {
             await assertBrowserNavigationResultAllowed({
               url: tab.url,
               ...ssrfPolicyOpts,
@@ -853,7 +864,7 @@ export function registerBrowserAgentSnapshotRoutes(
               selector: plan.selectorValue,
               frameSelector: plan.frameSelectorValue,
               refsMode: plan.refsMode,
-              ssrfPolicy: ctx.state().resolved.ssrfPolicy,
+              ...browserNavigationPolicyForProfile(ctx, profileCtx),
               urls: plan.urls,
               timeoutMs: plan.timeoutMs,
               maxChars: plan.resolvedMaxChars,
@@ -904,7 +915,7 @@ export function registerBrowserAgentSnapshotRoutes(
                 ? await pw.snapshotAiViaPlaywright({
                     cdpUrl: profileCtx.profile.cdpUrl,
                     targetId: tab.targetId,
-                    ssrfPolicy: ctx.state().resolved.ssrfPolicy,
+                    ...browserNavigationPolicyForProfile(ctx, profileCtx),
                     urls: plan.urls,
                     timeoutMs: plan.timeoutMs,
                     ...(typeof plan.resolvedMaxChars === "number"
@@ -997,7 +1008,7 @@ export function registerBrowserAgentSnapshotRoutes(
                     targetId: tab.targetId,
                     limit: plan.limit,
                     timeoutMs: plan.timeoutMs,
-                    ssrfPolicy: ctx.state().resolved.ssrfPolicy,
+                    ...browserNavigationPolicyForProfile(ctx, profileCtx),
                   });
                 });
               })()

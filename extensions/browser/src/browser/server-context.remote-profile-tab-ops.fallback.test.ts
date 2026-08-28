@@ -349,6 +349,7 @@ describe("browser remote profile fallback and attachOnly behavior", () => {
       cdpUrl: "http://127.0.0.1:18800",
       url: "https://example.com",
       ssrfPolicy: undefined,
+      navigationPolicy: { version: 1, allow: [], deny: [] },
       signal: expect.any(AbortSignal),
       waitForNavigationResult: true,
       timeouts: {
@@ -384,6 +385,7 @@ describe("browser remote profile fallback and attachOnly behavior", () => {
       cdpUrl: "http://127.0.0.1:18800",
       url: "http://127.0.0.1:3000",
       ssrfPolicy: undefined,
+      navigationPolicy: { version: 1, allow: [], deny: [] },
       signal: expect.any(AbortSignal),
       waitForNavigationResult: true,
     });

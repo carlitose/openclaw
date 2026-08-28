@@ -165,6 +165,34 @@ The extension excludes incognito tabs, internal pages such as `chrome://` and
 `chrome-extension://`, and tabs without a usable current URL. `file://` access
 also requires Chrome's **Allow access to file URLs** setting.
 
+### Limit navigation by hostname
+
+An extension profile can add a hostname boundary that is cumulative with the
+browser SSRF policy:
+
+```json5
+{
+  browser: {
+    profiles: {
+      chrome: {
+        driver: "extension",
+        navigationPolicy: {
+          allowHostnames: ["example.com", "*.example.com"],
+          denyHostnames: ["admin.example.com"],
+        },
+      },
+    },
+  },
+}
+```
+
+Exact entries match only that hostname. `*.example.com` matches subdomains but
+not the apex, and deny entries override allow entries. OpenClaw installs the
+policy after relay authentication and withholds tabs until the relay has also
+applied SSRF checks. A denied create, redirect, popup, or later URL change is
+detached and removed from OpenClaw inventory; task-created tabs are cleaned up
+by exact physical ID.
+
 ## Automatic setup controls
 
 Settings shows redacted relay/native bootstrap status and an **Use automatic

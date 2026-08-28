@@ -11,6 +11,8 @@ export type RelayTabInfo = {
   url: string;
   title: string;
   active: boolean;
+  /** Ephemeral task generation minted by the extension for relay-created tabs. */
+  taskGeneration?: string;
 };
 
 /** First message the extension sends after the WebSocket opens. */
@@ -20,7 +22,20 @@ type ExtensionHelloMessage = {
   /** Full browser product string, e.g. "Chrome/144.0.7204.49". */
   browserVersion: string;
   extensionVersion: string;
+  /** Ephemeral extension-worker identity used to distinguish reconnect from replacement. */
+  extensionInstanceId?: string;
+  /** Exact nonce from this socket's navigation-policy installation frame. */
+  navigationPolicyNonce?: string;
   tabs: RelayTabInfo[];
+};
+
+/** Ask the relay owner to apply hostname and SSRF policy to one live tab URL. */
+type ExtensionNavigationCheckMessage = {
+  type: "navigationCheck";
+  seq: number;
+  nonce: string;
+  tabId: number;
+  url: string;
 };
 
 /** Full refresh of accessible tabs; sent on any access-policy or tab change. */
@@ -39,10 +54,22 @@ type ExtensionCdpEventMessage = {
 type ExtensionResultMessage = { type: "result"; seq: number; result?: unknown };
 
 /** Failed response to a relay command. */
-type ExtensionErrorMessage = { type: "error"; seq: number; message: string };
+type ExtensionErrorMessage = {
+  type: "error";
+  seq: number;
+  message: string;
+  details?: unknown;
+};
 
 /** chrome.debugger detached outside relay control (infobar cancel, tab gone). */
 type ExtensionDetachedMessage = { type: "detached"; tabId: number; reason: string };
+
+/** Exact task-owned physical tab removal observed by Chrome. */
+type ExtensionTaskTabRemovedMessage = {
+  type: "taskTabRemoved";
+  tabId: number;
+  taskGeneration: string;
+};
 
 /** Keepalive reply; message traffic keeps the MV3 service worker alive. */
 type ExtensionPongMessage = { type: "pong" };
@@ -54,6 +81,8 @@ export type ExtensionToRelayMessage =
   | ExtensionResultMessage
   | ExtensionErrorMessage
   | ExtensionDetachedMessage
+  | ExtensionTaskTabRemovedMessage
+  | ExtensionNavigationCheckMessage
   | ExtensionPongMessage;
 
 /**
@@ -62,7 +91,14 @@ export type ExtensionToRelayMessage =
  */
 export type RelayCommandBody =
   /** Forward a CDP command into an attached tab (or one of its child sessions). */
-  | { type: "cdp"; tabId: number; sessionId?: string; method: string; params?: unknown }
+  | {
+      type: "cdp";
+      tabId: number;
+      sessionId?: string;
+      method: string;
+      params?: unknown;
+      taskGeneration?: string;
+    }
   /** Attach chrome.debugger to an accessible tab. Result: { targetId: string }. */
   | { type: "attach"; tabId: number }
   /** Detach chrome.debugger from a tab (access revoked or client detached). */
@@ -71,6 +107,8 @@ export type RelayCommandBody =
   | { type: "createTab"; url: string; background?: boolean; focus?: boolean }
   /** Close an accessible tab. Result: {}. */
   | { type: "closeTab"; tabId: number }
+  /** Close one exact task generation, descendants first. */
+  | { type: "cleanupTask"; tabId: number; taskGeneration: string }
   /** Focus an accessible tab (window + tab activation). Result: {}. */
   | { type: "activateTab"; tabId: number };
 
@@ -79,7 +117,31 @@ type RelayPingMessage = {
   type: "ping";
 };
 
-export type RelayToExtensionMessage = (RelayCommandBody & { seq: number }) | RelayPingMessage;
+type RelayNavigationPolicyMessage = {
+  type: "navigationPolicy.v1";
+  nonce: string;
+  policy: import("../../../chrome-extension/modules/navigation-policy.js").CompiledNavigationPolicyV1;
+};
+
+type RelayNavigationDecisionMessage = {
+  type: "navigationDecision";
+  seq: number;
+  nonce: string;
+  allowed: boolean;
+  message?: string;
+};
+
+type RelayRevokeTasksMessage = {
+  type: "revokeTasks";
+  reason: "extension-replaced" | "relay-stopped";
+};
+
+export type RelayToExtensionMessage =
+  | (RelayCommandBody & { seq: number })
+  | RelayPingMessage
+  | RelayNavigationPolicyMessage
+  | RelayNavigationDecisionMessage
+  | RelayRevokeTasksMessage;
 
 type RelayFrame = Record<string, unknown>;
 
@@ -92,7 +154,10 @@ function isRelayTabInfo(value: unknown): value is RelayTabInfo {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
   }
-  if (!hasExactOwnKeys(value, ["tabId", "url", "title", "active"])) {
+  const keys = Object.hasOwn(value, "taskGeneration")
+    ? ["tabId", "url", "title", "active", "taskGeneration"]
+    : ["tabId", "url", "title", "active"];
+  if (!hasExactOwnKeys(value, keys)) {
     return false;
   }
   const tab = value as Record<string, unknown>;
@@ -103,7 +168,9 @@ function isRelayTabInfo(value: unknown): value is RelayTabInfo {
     tab.url.length <= 16_384 &&
     typeof tab.title === "string" &&
     tab.title.length <= 4_096 &&
-    typeof tab.active === "boolean"
+    typeof tab.active === "boolean" &&
+    (tab.taskGeneration === undefined ||
+      (typeof tab.taskGeneration === "string" && tab.taskGeneration.length <= 128))
   );
 }
 
@@ -120,9 +187,15 @@ function isNonNegativeSafeInteger(value: unknown): value is number {
 }
 
 function isExtensionHelloMessage(value: object): value is ExtensionHelloMessage {
-  if (
-    !hasExactOwnKeys(value, ["type", "userAgent", "browserVersion", "extensionVersion", "tabs"])
-  ) {
+  const keys = ["type", "userAgent", "browserVersion", "extensionVersion"];
+  if (Object.hasOwn(value, "extensionInstanceId")) {
+    keys.push("extensionInstanceId");
+  }
+  if (Object.hasOwn(value, "navigationPolicyNonce")) {
+    keys.push("navigationPolicyNonce");
+  }
+  keys.push("tabs");
+  if (!hasExactOwnKeys(value, keys)) {
     return false;
   }
   const hello = value as RelayFrame;
@@ -137,11 +210,35 @@ function isExtensionHelloMessage(value: object): value is ExtensionHelloMessage 
     typeof hello.extensionVersion !== "string" ||
     hello.extensionVersion.length === 0 ||
     hello.extensionVersion.length > 128 ||
+    (hello.extensionInstanceId !== undefined &&
+      (typeof hello.extensionInstanceId !== "string" ||
+        hello.extensionInstanceId.length < 16 ||
+        hello.extensionInstanceId.length > 128)) ||
+    (hello.navigationPolicyNonce !== undefined &&
+      (typeof hello.navigationPolicyNonce !== "string" ||
+        hello.navigationPolicyNonce.length < 16 ||
+        hello.navigationPolicyNonce.length > 128)) ||
     !isRelayTabInfoArray(hello.tabs)
   ) {
     return false;
   }
   return true;
+}
+
+function isExtensionNavigationCheckMessage(
+  msg: RelayFrame,
+): msg is RelayFrame & ExtensionNavigationCheckMessage {
+  return (
+    hasExactOwnKeys(msg, ["type", "seq", "nonce", "tabId", "url"]) &&
+    msg.type === "navigationCheck" &&
+    isNonNegativeSafeInteger(msg.seq) &&
+    typeof msg.nonce === "string" &&
+    msg.nonce.length >= 16 &&
+    msg.nonce.length <= 128 &&
+    isNonNegativeSafeInteger(msg.tabId) &&
+    typeof msg.url === "string" &&
+    msg.url.length <= 16_384
+  );
 }
 
 function isExtensionTabsMessage(msg: RelayFrame): msg is RelayFrame & ExtensionTabsMessage {
@@ -162,14 +259,37 @@ function isExtensionResultMessage(msg: RelayFrame): msg is RelayFrame & Extensio
 }
 
 function isExtensionErrorMessage(msg: RelayFrame): msg is RelayFrame & ExtensionErrorMessage {
+  const keys = Object.hasOwn(msg, "details")
+    ? ["type", "seq", "message", "details"]
+    : ["type", "seq", "message"];
+  const details = msg.details === undefined ? "" : JSON.stringify(msg.details);
   return (
-    msg.type === "error" && isNonNegativeSafeInteger(msg.seq) && typeof msg.message === "string"
+    hasExactOwnKeys(msg, keys) &&
+    msg.type === "error" &&
+    isNonNegativeSafeInteger(msg.seq) &&
+    typeof msg.message === "string" &&
+    new TextEncoder().encode(msg.message).byteLength <= 4_096 &&
+    details !== undefined &&
+    new TextEncoder().encode(details).byteLength <= 16_384
   );
 }
 
 function isExtensionDetachedMessage(msg: RelayFrame): msg is RelayFrame & ExtensionDetachedMessage {
   return (
     msg.type === "detached" && isNonNegativeSafeInteger(msg.tabId) && typeof msg.reason === "string"
+  );
+}
+
+function isExtensionTaskTabRemovedMessage(
+  msg: RelayFrame,
+): msg is RelayFrame & ExtensionTaskTabRemovedMessage {
+  return (
+    hasExactOwnKeys(msg, ["type", "tabId", "taskGeneration"]) &&
+    msg.type === "taskTabRemoved" &&
+    isNonNegativeSafeInteger(msg.tabId) &&
+    typeof msg.taskGeneration === "string" &&
+    msg.taskGeneration.length >= 16 &&
+    msg.taskGeneration.length <= 128
   );
 }
 
@@ -205,6 +325,10 @@ export function parseExtensionMessage(raw: string): ExtensionToRelayMessage | nu
       return isExtensionErrorMessage(msg) ? msg : null;
     case "detached":
       return isExtensionDetachedMessage(msg) ? msg : null;
+    case "taskTabRemoved":
+      return isExtensionTaskTabRemovedMessage(msg) ? msg : null;
+    case "navigationCheck":
+      return isExtensionNavigationCheckMessage(msg) ? msg : null;
     case "pong":
       return isExtensionPongMessage(msg) ? msg : null;
     default:

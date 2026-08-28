@@ -353,11 +353,12 @@ export function nearestGroupColor(hex) {
 }
 
 /** Normalize a chrome.tabs.Tab into the relay's tab info shape. */
-export function toRelayTabInfo(tab) {
+export function toRelayTabInfo(tab, taskGeneration) {
   return {
     tabId: tab.id,
     url: tab.url ?? "",
     title: tab.title ?? "",
     active: tab.active === true,
+    ...(taskGeneration ? { taskGeneration } : {}),
   };
 }

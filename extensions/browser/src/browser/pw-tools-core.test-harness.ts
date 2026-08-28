@@ -111,7 +111,11 @@ const downloadCaptureMocks = vi.hoisted(() => ({
 
 const navigationGuardMocks = vi.hoisted(() => ({
   assertBrowserNavigationResultAllowed: vi.fn(async () => {}),
-  withBrowserNavigationPolicy: vi.fn((ssrfPolicy?: unknown) => ({ ssrfPolicy })),
+  withBrowserNavigationPolicy: vi.fn((ssrfPolicy?: unknown, opts?: Record<string, unknown>) => ({
+    ...(ssrfPolicy ? { ssrfPolicy } : {}),
+    ...(opts?.browserProxyMode ? { browserProxyMode: opts.browserProxyMode } : {}),
+    ...(opts?.navigationPolicy ? { navigationPolicy: opts.navigationPolicy } : {}),
+  })),
 }));
 
 vi.mock("./pw-session.js", () => sessionMocks);

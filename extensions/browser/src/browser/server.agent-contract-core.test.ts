@@ -511,8 +511,7 @@ describe("browser control server", () => {
       ok: boolean;
       format?: string;
     };
-    expect(snapAi.ok).toBe(true);
-    expect(snapAi.format).toBe("ai");
+    expect(snapAi).toMatchObject({ ok: true, format: "ai" });
     expect(requirePwMock("snapshotAiViaPlaywright")).toHaveBeenCalledWith({
       cdpUrl: state.cdpBaseUrl,
       targetId: "abcd1234",
@@ -520,6 +519,7 @@ describe("browser control server", () => {
       ssrfPolicy: {
         dangerouslyAllowPrivateNetwork: true,
       },
+      navigationPolicy: { version: 1, allow: [], deny: [] },
     });
 
     const snapAiZero = (await realFetch(`${base}/snapshot?format=ai&maxChars=0`).then((r) =>
@@ -534,6 +534,7 @@ describe("browser control server", () => {
       ssrfPolicy: {
         dangerouslyAllowPrivateNetwork: true,
       },
+      navigationPolicy: { version: 1, allow: [], deny: [] },
     });
 
     requirePwMock("snapshotRoleViaPlaywright").mockRejectedValueOnce(

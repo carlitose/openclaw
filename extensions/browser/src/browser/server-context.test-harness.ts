@@ -21,6 +21,7 @@ export function makeBrowserProfile(
     driver: "openclaw",
     headless: false,
     attachOnly: false,
+    compiledNavigationPolicy: { version: 1, allow: [], deny: [] },
     ...overrides,
   };
 }

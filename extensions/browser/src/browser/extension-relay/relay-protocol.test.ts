@@ -31,6 +31,15 @@ describe("parseExtensionMessage", () => {
     expect(
       parseExtensionMessage(JSON.stringify({ type: "detached", tabId: 1, reason: "cancel" })),
     ).toMatchObject({ type: "detached", tabId: 1 });
+    expect(
+      parseExtensionMessage(
+        JSON.stringify({
+          type: "taskTabRemoved",
+          tabId: 1,
+          taskGeneration: "task-generation-1",
+        }),
+      ),
+    ).toMatchObject({ type: "taskTabRemoved", tabId: 1 });
   });
 
   it.each([
@@ -106,9 +115,14 @@ describe("parseExtensionMessage", () => {
       { type: "result", seq: 1.5 },
       { type: "error", seq: null, message: "boom" },
       { type: "error", seq: 3, message: {} },
+      { type: "error", seq: 3, message: "x".repeat(4_097) },
+      { type: "error", seq: 3, message: "boom", details: "x".repeat(16_385) },
+      { type: "error", seq: 3, message: "boom", extra: true },
       // detached: numeric tabId.
       { type: "detached", tabId: "1", reason: "cancel" },
       { type: "detached", tabId: 1, reason: null },
+      { type: "taskTabRemoved", tabId: 1, taskGeneration: "short" },
+      { type: "taskTabRemoved", tabId: 1, taskGeneration: "task-generation-1", extra: true },
     ];
     for (const frame of cases) {
       expect(parseExtensionMessage(JSON.stringify(frame))).toBeNull();

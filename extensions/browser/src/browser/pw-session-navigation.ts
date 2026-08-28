@@ -6,6 +6,7 @@ import {
   assertBrowserNavigationAllowed,
   assertBrowserNavigationRedirectChainAllowed,
   assertBrowserNavigationResultAllowed,
+  hasBrowserNavigationPolicy,
   InvalidBrowserNavigationUrlError,
   type BrowserNavigationPolicyOptions,
   withBrowserNavigationPolicy,
@@ -101,6 +102,7 @@ export async function assertPageNavigationCompletedSafely(
   } & BrowserNavigationPolicyOptions,
 ): Promise<void> {
   const navigationPolicy = withBrowserNavigationPolicy(opts.ssrfPolicy, {
+    navigationPolicy: opts.navigationPolicy,
     browserProxyMode: opts.browserProxyMode,
   });
   try {
@@ -190,9 +192,10 @@ export async function withPageNavigationRequestGuard<T>(
   } & BrowserNavigationPolicyOptions,
 ): Promise<T> {
   const navigationPolicy = withBrowserNavigationPolicy(opts.ssrfPolicy, {
+    navigationPolicy: opts.navigationPolicy,
     browserProxyMode: opts.browserProxyMode,
   });
-  if (!navigationPolicy.ssrfPolicy && !navigationPolicy.browserProxyMode) {
+  if (!hasBrowserNavigationPolicy(navigationPolicy)) {
     return await opts.action(opts.page.url());
   }
 
@@ -418,6 +421,7 @@ export async function gotoPageWithNavigationGuard(
   } & BrowserNavigationPolicyOptions,
 ): Promise<Response | null> {
   const navigationPolicy = withBrowserNavigationPolicy(opts.ssrfPolicy, {
+    navigationPolicy: opts.navigationPolicy,
     browserProxyMode: opts.browserProxyMode,
   });
   let blockedError: unknown = null;

@@ -20,10 +20,18 @@ type PendingRelayEnsure = {
   port: number;
   token: string;
   allowLegacyAuth: boolean;
+  navigationPolicyKey: string;
   promise: Promise<ExtensionRelayHandle>;
 };
 
 const pendingRelayEnsures = new WeakMap<ProfileRuntimeState, PendingRelayEnsure>();
+
+function navigationPolicyKey(state: BrowserServerState, profile: ResolvedBrowserProfile): string {
+  return JSON.stringify({
+    navigationPolicy: profile.compiledNavigationPolicy,
+    ssrfPolicy: state.resolved.ssrfPolicy,
+  });
+}
 
 /** Human guidance for a relay without a paired/connected extension. */
 export const EXTENSION_PAIRING_HINT =
@@ -101,11 +109,13 @@ export async function ensureExtensionRelayForProfile(
       Object.assign(runtime.profile, desiredProfile);
     }
     const pending = pendingRelayEnsures.get(runtime);
+    const desiredNavigationPolicyKey = navigationPolicyKey(state, desiredProfile);
     if (pending) {
       if (
         pending.port === desiredProfile.cdpPort &&
         pending.token === token &&
-        pending.allowLegacyAuth === state.resolved.extensionRelay.allowLegacyAuth
+        pending.allowLegacyAuth === state.resolved.extensionRelay.allowLegacyAuth &&
+        pending.navigationPolicyKey === desiredNavigationPolicyKey
       ) {
         const handle = await waitForProfileOperation(pending.promise, signal);
         const current = resolveProfile(state.resolved, profile.name);
@@ -130,6 +140,7 @@ export async function ensureExtensionRelayForProfile(
       port: desiredProfile.cdpPort,
       token,
       allowLegacyAuth: state.resolved.extensionRelay.allowLegacyAuth,
+      navigationPolicyKey: desiredNavigationPolicyKey,
       promise,
     };
     pendingRelayEnsures.set(runtime, owned);
@@ -165,10 +176,12 @@ async function ensureDesiredRelay(params: {
       const actor = getProfileLifecycle(runtime);
       const existing = map.get(profile.name);
       if (existing) {
+        const desiredNavigationPolicyKey = navigationPolicyKey(state, profile);
         if (
           existing.port === profile.cdpPort &&
           existing.token === token &&
-          existing.allowLegacyAuth === state.resolved.extensionRelay.allowLegacyAuth
+          existing.allowLegacyAuth === state.resolved.extensionRelay.allowLegacyAuth &&
+          existing.navigationPolicyKey === desiredNavigationPolicyKey
         ) {
           const current = applyInternalRelayToken(state, profile.name, existing.internalToken);
           if (current) {
@@ -191,6 +204,8 @@ async function ensureDesiredRelay(params: {
           port: profile.cdpPort,
           token,
           allowLegacyAuth: state.resolved.extensionRelay.allowLegacyAuth,
+          navigationPolicy: profile.compiledNavigationPolicy,
+          ssrfPolicy: state.resolved.ssrfPolicy,
         });
         actor.cleanupRelays.add(handle);
         signal.throwIfAborted();

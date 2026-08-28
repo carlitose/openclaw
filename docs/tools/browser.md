@@ -190,6 +190,13 @@ Browser settings live in `~/.openclaw/openclaw.json`.
         userDataDir: "~/Library/Application Support/BraveSoftware/Brave-Browser",
       },
       remote: { cdpUrl: "http://10.0.0.42:9222" },
+      restricted: {
+        cdpPort: 18802,
+        navigationPolicy: {
+          allowHostnames: ["example.com", "*.example.com"],
+          denyHostnames: ["admin.example.com"],
+        },
+      },
     },
   },
 }
@@ -343,6 +350,12 @@ main model can read the screenshot directly.
 - `browser.ssrfPolicy.allowedHostnames` grants exact hosts while the rest of the private network remains blocked.
 - `browser.ssrfPolicy.allowRfc2544BenchmarkRange` and `browser.ssrfPolicy.allowIpv6UniqueLocalRange` narrowly allow trusted fake-IP proxy ranges.
 - `browser.ssrfPolicy.allowPrivateNetwork` remains supported as a legacy alias.
+- `browser.profiles.<name>.navigationPolicy` adds a profile-specific hostname
+  boundary without replacing SSRF checks. Exact entries match only that host;
+  `*.example.com` matches subdomains but not `example.com`, and deny entries
+  override allow entries. The same decision applies to tab creation, direct
+  relay CDP navigation, redirects and later URL changes, popups, inventory, and
+  debugger attachment.
 
 </Accordion>
 

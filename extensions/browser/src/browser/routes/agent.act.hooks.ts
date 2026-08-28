@@ -10,6 +10,7 @@ import { resolveExistingUploadPaths } from "../paths.js";
 import { getBrowserProfileCapabilities } from "../profile-capabilities.js";
 import type { BrowserRouteContext } from "../server-context.js";
 import {
+  browserNavigationPolicyForProfile,
   readBody,
   requirePwAi,
   resolveTargetIdFromBody,
@@ -86,6 +87,7 @@ export function registerBrowserAgentActHookRoutes(
         }
 
         const browserFilesystemLocal = capabilities.browserFilesystemLocal;
+        const navigationPolicy = browserNavigationPolicyForProfile(ctx, profileCtx);
         if (inputRef || element) {
           if (ref) {
             return jsonError(res, 400, "ref cannot be combined with inputRef/element");
@@ -97,7 +99,7 @@ export function registerBrowserAgentActHookRoutes(
             inputRef,
             element,
             paths: resolvedPaths,
-            ssrfPolicy: ctx.state().resolved.ssrfPolicy,
+            ...navigationPolicy,
           });
         } else if (ref) {
           await pw.uploadViaPlaywright({
@@ -106,7 +108,7 @@ export function registerBrowserAgentActHookRoutes(
             targetId: tab.targetId,
             paths: resolvedPaths,
             timeoutMs: timeoutMs ?? undefined,
-            ssrfPolicy: ctx.state().resolved.ssrfPolicy,
+            ...navigationPolicy,
             ref,
             signal,
           });
@@ -117,7 +119,7 @@ export function registerBrowserAgentActHookRoutes(
             targetId: tab.targetId,
             paths: resolvedPaths,
             timeoutMs: timeoutMs ?? undefined,
-            ssrfPolicy: ctx.state().resolved.ssrfPolicy,
+            ...navigationPolicy,
           });
         }
         res.json({ ok: true });

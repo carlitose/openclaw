@@ -40,6 +40,7 @@ import {
   requestExtensionProtocolToken,
   requestProtocols,
 } from "./relay-request.js";
+import type { StartExtensionRelayServerParams } from "./relay-server.types.js";
 
 const log = createSubsystemLogger("browser").child("extension-relay");
 const INTERNAL_CDP_USERNAME = "openclaw-internal";
@@ -71,6 +72,7 @@ export type ExtensionRelayHandle = {
   port: number;
   token: string;
   allowLegacyAuth: boolean;
+  navigationPolicyKey?: string;
   /** Process-only Basic credential for OpenClaw's own CDP client. Never persisted or printed. */
   internalToken: string;
   bridge: ExtensionRelayBridge;
@@ -195,7 +197,7 @@ function trackAuthenticatedSocket(authority: BrowserRelayAuthV2Authority, ws: We
 }
 
 /** Wire an already-v2-authenticated extension socket to the bridge. */
-export function attachExtensionWebSocket(bridge: ExtensionRelayBridge, ws: WebSocket): void {
+export function attachExtensionWebSocket(bridge: ExtensionRelayBridge, ws: WebSocket): () => void {
   const handlers = bridge.attachExtensionSocket(ws);
   let helloSeen = false;
   const helloTimer = setTimeout(() => {
@@ -216,13 +218,14 @@ export function attachExtensionWebSocket(bridge: ExtensionRelayBridge, ws: WebSo
       handlers.onClose();
     },
   });
+  return handlers.installNavigationPolicy;
 }
 
 export function authenticateExtensionWebSocket(params: {
   ws: WebSocket;
   authority: BrowserRelayAuthV2Authority;
   resource: string;
-  prepareAuthenticated: () => Promise<() => void>;
+  prepareAuthenticated: () => Promise<() => void | (() => void)>;
   removePreAuthGuard?: () => void;
 }): void {
   const { ws, authority } = params;
@@ -326,11 +329,13 @@ export function authenticateExtensionWebSocket(params: {
             return;
           }
           ws.off("message", onMessage);
-          attach();
+          const afterAcknowledgement = attach();
           ws.send(JSON.stringify(completed.ok), (err) => {
             if (err) {
               ws.close(1011, "browser relay auth acknowledgement failed");
+              return;
             }
+            afterAcknowledgement?.();
           });
         })
         .catch((err: unknown) => {
@@ -344,18 +349,24 @@ export function authenticateExtensionWebSocket(params: {
   ws.on("message", onMessage);
 }
 
-export async function startExtensionRelayServer(params: {
-  port: number;
-  token: string;
-  allowLegacyAuth?: boolean;
-  onStateChange?: () => void;
-}): Promise<ExtensionRelayHandle> {
+export async function startExtensionRelayServer(
+  params: StartExtensionRelayServerParams,
+): Promise<ExtensionRelayHandle> {
   const allowLegacyAuth = params.allowLegacyAuth ?? true;
+  const navigationPolicyKey = JSON.stringify({
+    navigationPolicy: params.navigationPolicy,
+    ssrfPolicy: params.ssrfPolicy,
+  });
   const internalToken = crypto.randomBytes(32).toString("base64url");
   if (readExtensionRelayToken() === params.token) {
     getBrowserRelayAuthV2Authority(params.token);
   }
-  const bridge = new ExtensionRelayBridge({ onStateChange: params.onStateChange });
+  const bridge = new ExtensionRelayBridge({
+    onStateChange: params.onStateChange,
+    navigationPolicy: params.navigationPolicy,
+    ssrfPolicy: params.ssrfPolicy,
+    lookupFn: params.lookupFn,
+  });
   const wss = new WebSocketServer({
     noServer: true,
     maxPayload: EXTENSION_RELAY_MAX_PAYLOAD_BYTES,
@@ -624,8 +635,9 @@ export async function startExtensionRelayServer(params: {
                 resource,
                 removePreAuthGuard,
                 prepareAuthenticated: async () => () => {
-                  attachExtensionWebSocket(bridge, ws);
+                  const installNavigationPolicy = attachExtensionWebSocket(bridge, ws);
                   log.info("extension authenticated and connected to relay");
+                  return installNavigationPolicy;
                 },
               });
             },
@@ -649,7 +661,7 @@ export async function startExtensionRelayServer(params: {
         if (!trackAuthenticatedSocket(authority, ws)) {
           return;
         }
-        attachExtensionWebSocket(bridge, ws);
+        attachExtensionWebSocket(bridge, ws)();
         log.warn("legacy extension relay authentication accepted");
       });
       return;
@@ -700,6 +712,7 @@ export async function startExtensionRelayServer(params: {
     port: resolvedPort(),
     token: params.token,
     allowLegacyAuth,
+    navigationPolicyKey,
     internalToken,
     bridge,
     close: async () => {

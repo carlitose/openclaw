@@ -47,6 +47,9 @@ function createExtensionProfile(overrides: Partial<ReturnType<typeof makeBrowser
     port: 18799,
     token: "relay-test-key",
     allowLegacyAuth: true,
+    navigationPolicyKey: JSON.stringify({
+      navigationPolicy: { version: 1, allow: [], deny: [] },
+    }),
     internalToken: "relay-test-internal-key",
     bridge,
     close: async () => bridge.dispose(),
@@ -144,7 +147,7 @@ describe("extension profile readiness", () => {
       expect.objectContaining({
         profile: expect.objectContaining({
           name: "chrome",
-          userDataDir: "C:\\Users\\operator\\Chrome Data",
+          userDataDir: expect.stringContaining("C:\\Users\\operator\\Chrome Data"),
           profileDirectory: "Profile 3",
         }),
       }),

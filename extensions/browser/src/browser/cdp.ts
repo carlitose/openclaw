@@ -8,6 +8,7 @@ import type { lookup as dnsLookupCb } from "node:dns";
 import { expectDefined } from "openclaw/plugin-sdk/expect-runtime";
 import { resolveIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
+import type { CompiledNavigationPolicyV1 } from "../../chrome-extension/modules/navigation-policy.js";
 import type { SsrFPolicy } from "../infra/net/ssrf.js";
 import {
   prepareCdpPageSession,
@@ -218,6 +219,7 @@ export async function createTargetViaCdp(opts: {
   cdpUrl: string;
   url: string;
   ssrfPolicy?: SsrFPolicy;
+  navigationPolicy?: CompiledNavigationPolicyV1;
   timeouts?: CdpActionTimeouts;
   signal?: AbortSignal;
   /** Wait for the created document to finish navigation and return its authoritative URL. */
@@ -226,7 +228,9 @@ export async function createTargetViaCdp(opts: {
   opts.signal?.throwIfAborted();
   await assertBrowserNavigationAllowed({
     url: opts.url,
-    ...withBrowserNavigationPolicy(opts.ssrfPolicy),
+    ...withBrowserNavigationPolicy(opts.ssrfPolicy, {
+      navigationPolicy: opts.navigationPolicy,
+    }),
   });
   const configuredCdpPin = await assertCdpEndpointAllowed(opts.cdpUrl, opts.ssrfPolicy);
   const cdpControlPolicy = scopeCdpPolicyToConfiguredEndpoint(opts.cdpUrl, opts.ssrfPolicy);

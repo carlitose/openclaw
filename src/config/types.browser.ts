@@ -26,6 +26,11 @@ export type BrowserProfileConfig = {
   executablePath?: string;
   /** If true, never launch a browser for this profile; only attach. Falls back to browser.attachOnly. */
   attachOnly?: boolean;
+  /** Optional exclusive/denied hostname policy for browser navigation in this profile. */
+  navigationPolicy?: {
+    allowHostnames?: string[];
+    denyHostnames?: string[];
+  };
 };
 export type BrowserSnapshotDefaults = {
   /** Default snapshot mode (applies when mode is not provided). */

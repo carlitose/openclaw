@@ -73,7 +73,9 @@ export async function loadBackground({
   let tabsReplacedListener: ((addedTabId: number, removedTabId: number) => void) | undefined;
   let tabGroupUpdatedListener: (() => void) | undefined;
   let tabGroupRemovedListener: (() => void) | undefined;
-  let tabsUpdatedListener: ((tabId: number, changeInfo: { groupId?: number }) => void) | undefined;
+  let tabsUpdatedListener:
+    | ((tabId: number, changeInfo: { groupId?: number; url?: string }) => void)
+    | undefined;
   let nextStorageGet: Promise<void> | null = null;
   let nextStorageRemove: Promise<void> | null = null;
   let nextStorageSet: Promise<void> | null = null;
@@ -388,7 +390,7 @@ export async function loadBackground({
       },
       onUpdated: {
         addListener: vi.fn(
-          (listener: (tabId: number, changeInfo: { groupId?: number }) => void) => {
+          (listener: (tabId: number, changeInfo: { groupId?: number; url?: string }) => void) => {
             tabsUpdatedListener = listener;
           },
         ),
@@ -550,6 +552,28 @@ export async function loadBackground({
           fields,
           response.clientProof,
         ),
+      });
+      socket.send.mockImplementation((raw: string) => {
+        const message = JSON.parse(raw) as {
+          type?: string;
+          seq?: number;
+          nonce?: string;
+        };
+        if (message.type === "navigationCheck") {
+          queueMicrotask(() =>
+            socket.receive({
+              type: "navigationDecision",
+              seq: message.seq,
+              nonce: message.nonce,
+              allowed: true,
+            }),
+          );
+        }
+      });
+      socket.receive({
+        type: "navigationPolicy.v1",
+        nonce: "test-navigation-policy-nonce-0001",
+        policy: { version: 1, allow: [], deny: [] },
       });
       await waitForBackgroundState(() => {
         expect(socket.send.mock.calls.some(([raw]) => JSON.parse(raw).type === "hello")).toBe(true);

@@ -9,6 +9,8 @@ export function createRelayCommandHandler({
   captureAccess,
   requireAccessibleTab,
   rememberUtilityWorld,
+  attachCreatedDebugger,
+  taskTabs,
 }) {
   return async (message) => {
     const { seq } = message;
@@ -26,7 +28,12 @@ export function createRelayCommandHandler({
           return;
         case "cdp": {
           const epoch = captureAccess(message.tabId);
-          await requireAccessibleTab(message.tabId, epoch);
+          const taskNavigation =
+            message.method === "Page.navigate" &&
+            taskTabs.owns(message.tabId, message.taskGeneration);
+          if (!taskNavigation) {
+            await requireAccessibleTab(message.tabId, epoch);
+          }
           const target = message.sessionId
             ? { tabId: message.tabId, sessionId: message.sessionId }
             : { tabId: message.tabId };
@@ -35,7 +42,9 @@ export function createRelayCommandHandler({
             message.method,
             message.params ?? {},
           );
-          await requireAccessibleTab(message.tabId, epoch);
+          if (!taskNavigation) {
+            await requireAccessibleTab(message.tabId, epoch);
+          }
           if (
             message.sessionId === undefined &&
             message.method === "Page.addScriptToEvaluateOnNewDocument" &&
@@ -52,12 +61,50 @@ export function createRelayCommandHandler({
             url: message.url,
             active: message.background !== true,
           });
-          await addTabToOpenClawGroup(tab.id);
-          if (message.focus === true) {
-            await focusWindowForTab(tab);
+          const taskGeneration = taskTabs.registerRoot(tab.id);
+          try {
+            await addTabToOpenClawGroup(tab.id);
+            if (message.focus === true) {
+              await focusWindowForTab(tab);
+            }
+            const attached = await attachCreatedDebugger(tab.id, taskGeneration);
+            scheduleTabsSync();
+            send({
+              type: "result",
+              seq,
+              result: { tabId: tab.id, taskGeneration, targetId: attached.targetId },
+            });
+          } catch (error) {
+            const messageText = error instanceof Error ? error.message : String(error);
+            const cleanup = await taskTabs.cleanup(taskGeneration);
+            send({
+              type: "error",
+              seq,
+              message:
+                cleanup.status === "complete"
+                  ? messageText
+                  : `${messageText}; exact tab cleanup is incomplete—close tab ${tab.id} manually before retrying`,
+              details: { kind: "tab-creation-failed", tabId: tab.id, cleanup },
+            });
+            return;
           }
-          scheduleTabsSync();
-          send({ type: "result", seq, result: { tabId: tab.id } });
+          return;
+        }
+        case "cleanupTask": {
+          if (!taskTabs.owns(message.tabId, message.taskGeneration)) {
+            throw new Error(`task ownership for tab ${message.tabId} is no longer current`);
+          }
+          const cleanup = await taskTabs.cleanup(message.taskGeneration);
+          if (cleanup.status === "incomplete") {
+            send({
+              type: "error",
+              seq,
+              message: `Task cleanup is incomplete—close tabs ${cleanup.remainingTabIds.join(", ")} manually before retrying`,
+              details: { kind: "task-cleanup-incomplete", cleanup },
+            });
+          } else {
+            send({ type: "result", seq, result: { cleanup } });
+          }
           return;
         }
         case "closeTab": {
