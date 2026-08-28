@@ -97,6 +97,42 @@ describe("relay authority rechecks", () => {
     expect(harness.requireAccessibleTab).toHaveBeenCalledTimes(2);
   });
 
+  it("allows the exact task generation to initialize its hidden page", async () => {
+    const harness = createHarness();
+    const taskGeneration = harness.taskTabs.registerRoot(7);
+
+    await harness.handler({
+      type: "cdp",
+      seq: 10,
+      tabId: 7,
+      method: "Page.enable",
+      taskGeneration,
+    });
+
+    expect(harness.requireAccessibleTab).not.toHaveBeenCalled();
+    expect(harness.chromeMock.debugger.sendCommand).toHaveBeenCalledWith(
+      { tabId: 7 },
+      "Page.enable",
+      {},
+    );
+  });
+
+  it("does not turn task ownership into general CDP authority", async () => {
+    const harness = createHarness();
+    const taskGeneration = harness.taskTabs.registerRoot(7);
+
+    await harness.handler({
+      type: "cdp",
+      seq: 11,
+      tabId: 7,
+      method: "Runtime.evaluate",
+      params: { expression: "location.href='https://example.com'" },
+      taskGeneration,
+    });
+
+    expect(harness.requireAccessibleTab).toHaveBeenCalledTimes(2);
+  });
+
   it("remembers the root automation world only after the command remains authorized", async () => {
     const harness = createHarness();
     await harness.handler({

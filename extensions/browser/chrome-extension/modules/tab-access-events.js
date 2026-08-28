@@ -22,6 +22,7 @@ export function registerTabAccessEvents({
   classifyDescendantNavigation,
   taskTabs = {
     registerDescendant: () => null,
+    generationFor: () => undefined,
     forget: () => undefined,
     replace: () => false,
     revoke: () => undefined,
@@ -215,6 +216,18 @@ export function registerTabAccessEvents({
       const eventIsCurrent = () => policy.epochIsCurrent(tabId, eventEpoch);
       if (!eventIsCurrent()) {
         return;
+      }
+      const taskGeneration = taskTabs.generationFor?.(tabId);
+      if (taskGeneration) {
+        const taskTab = await chromeApi.tabs.get(tabId).catch(() => null);
+        if (!eventIsCurrent() || taskTabs.generationFor?.(tabId) !== taskGeneration || !taskTab) {
+          return;
+        }
+        // The exact task attachment stays hidden but alive while its inert page initializes.
+        // Any meaningful URL falls through to the normal policy proof before CDP events resume.
+        if (effectiveTabUrl(taskTab) === "about:blank") {
+          return;
+        }
       }
       const state = await policy.inspectTab(tabId, eventEpoch);
       if (!eventIsCurrent()) {

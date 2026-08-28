@@ -1,4 +1,5 @@
 import type { TabAccessEpoch, TabAccessMode, TabAccessState } from "./tab-access.js";
+import type { TaskTabLifecycle } from "./task-tab-lifecycle.js";
 
 type ChromeEvent<Listener> = {
   addListener(listener: Listener): void;
@@ -63,6 +64,10 @@ export function registerTabAccessEvents(options: {
   removeTabFromOpenClawGroup(tabId: number): void | Promise<void>;
   placeTabInGroup(tabId: number, groupId: number): Promise<void>;
   runAccessMutation(task: () => void | Promise<void>): Promise<void>;
+  taskTabs?: Pick<
+    TaskTabLifecycle,
+    "registerDescendant" | "generationFor" | "forget" | "replace" | "revoke"
+  >;
   getUtilityWorldName(tabId: number): string | undefined;
   forgetUtilityWorld(tabId: number): void;
 }): void;

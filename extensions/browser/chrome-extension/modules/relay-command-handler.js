@@ -1,3 +1,5 @@
+import { isTaskBootstrapCdpCommand } from "./task-bootstrap-cdp.js";
+
 /** Build the authenticated application-command dispatcher for the relay socket. */
 export function createRelayCommandHandler({
   send,
@@ -28,10 +30,12 @@ export function createRelayCommandHandler({
           return;
         case "cdp": {
           const epoch = captureAccess(message.tabId);
-          const taskNavigation =
-            message.method === "Page.navigate" &&
-            taskTabs.owns(message.tabId, message.taskGeneration);
-          if (!taskNavigation) {
+          const exactTask = taskTabs.owns(message.tabId, message.taskGeneration);
+          const taskCommand =
+            exactTask &&
+            (message.method === "Page.navigate" ||
+              isTaskBootstrapCdpCommand(message.method, message.params));
+          if (!taskCommand) {
             await requireAccessibleTab(message.tabId, epoch);
           }
           const target = message.sessionId
@@ -42,7 +46,7 @@ export function createRelayCommandHandler({
             message.method,
             message.params ?? {},
           );
-          if (!taskNavigation) {
+          if (!taskCommand) {
             await requireAccessibleTab(message.tabId, epoch);
           }
           if (

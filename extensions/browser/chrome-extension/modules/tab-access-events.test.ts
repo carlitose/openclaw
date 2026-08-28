@@ -35,6 +35,8 @@ function createHarness(
   let groupUpdatedListener: (() => void) | undefined;
   let revision = 0;
   let accessible = true;
+  let currentTabUrl = "https://two.example";
+  let taskGeneration: string | undefined;
   const attachedTabs = new Set([7]);
   const attachedAccessEpochs = new Map([[7, { revision: 0, tabRevision: 0 }]]);
   const attachmentTokens = new Map([[7, Symbol("attachment-7")]]);
@@ -110,7 +112,7 @@ function createHarness(
     tabs: {
       get: vi.fn(async (tabId: number) => ({
         id: tabId,
-        url: "https://two.example",
+        url: currentTabUrl,
         groupId: tabId === 7 ? 23 : -1,
       })),
       onCreated: {
@@ -156,6 +158,13 @@ function createHarness(
     removeTabFromOpenClawGroup,
     placeTabInGroup: vi.fn(async () => undefined),
     runAccessMutation: vi.fn(async (task) => await task()),
+    taskTabs: {
+      registerDescendant: vi.fn(() => null),
+      generationFor: vi.fn(() => taskGeneration),
+      forget: vi.fn(),
+      replace: vi.fn(() => false),
+      revoke: vi.fn(),
+    },
     getUtilityWorldName: () => "__playwright_utility_world_page-guid",
     forgetUtilityWorld: vi.fn(),
   });
@@ -185,6 +194,12 @@ function createHarness(
     setAccessible: (next: boolean) => {
       accessible = next;
     },
+    setCurrentTabUrl: (url: string) => {
+      currentTabUrl = url;
+    },
+    setTaskGeneration: (generation: string | undefined) => {
+      taskGeneration = generation;
+    },
     tabsUpdatedListener,
     tabsReplacedListener,
   };
@@ -193,6 +208,22 @@ function createHarness(
 afterEach(() => vi.unstubAllGlobals());
 
 describe("tab access event epochs", () => {
+  it("keeps an exact hidden about:blank task attachment alive during bootstrap", async () => {
+    const harness = createHarness("selected");
+    harness.attachedAccessEpochs.delete(7);
+    harness.setAccessible(false);
+    harness.setCurrentTabUrl("about:blank");
+    harness.setTaskGeneration("task-generation-7");
+
+    harness.tabsUpdatedListener(7, { groupId: 23 });
+    await vi.waitFor(() => expect(harness.policy.epochIsCurrent).toHaveBeenCalled());
+    await Promise.resolve();
+
+    expect(harness.policy.inspectTab).not.toHaveBeenCalled();
+    expect(harness.detachDebugger).not.toHaveBeenCalled();
+    expect(harness.attachedAccessEpochs.has(7)).toBe(false);
+  });
+
   it("waits for stored access mode before handling Chrome's cancel revocation", async () => {
     const ready = deferred<void>();
     const harness = createHarness("selected", ready.promise);

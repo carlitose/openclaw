@@ -16,6 +16,7 @@ import {
   navigationPolicyIsEmpty,
   type CompiledNavigationPolicyV1,
 } from "../../../chrome-extension/modules/navigation-policy.js";
+import { isTaskBootstrapCdpCommand } from "../../../chrome-extension/modules/task-bootstrap-cdp.js";
 import type { LookupFn, SsrFPolicy } from "../../infra/net/ssrf.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { assertBrowserNavigationAllowed } from "../navigation-guard.js";
@@ -65,6 +66,8 @@ type TabState = {
   /** Hidden until the extension proves the current meaningful URL is allowed. */
   published: boolean;
   taskGeneration?: string;
+  /** The sole CDP client allowed to initialize this task before policy publication. */
+  taskOwner?: CdpClientState;
   /** Set while chrome.debugger is attached: real CDP targetId + synthetic root sessionId. */
   attached?: { targetId: string; sessionId: string };
   attaching?: Promise<{ targetId: string; sessionId: string }>;
@@ -655,6 +658,7 @@ export class ExtensionRelayBridge {
       if (existing) {
         existing.info = info;
         existing.published = true;
+        existing.taskOwner = undefined;
       } else {
         this.tabs.set(info.tabId, {
           info,
@@ -928,6 +932,13 @@ export class ExtensionRelayBridge {
           this.auxiliaryTabSessions.delete(sessionId);
         }
       }
+      for (const [tabId, tab] of this.tabs) {
+        if (!tab.published && tab.taskOwner === client && tab.taskGeneration) {
+          void this.cleanupOwnedTask(tabId, tab.taskGeneration).catch((error: unknown) => {
+            log.warn(`disconnected task cleanup failed: ${String(error)}`);
+          });
+        }
+      }
       this.detachAllWhenIdle();
     };
     return { onMessage, onClose };
@@ -1039,15 +1050,24 @@ export class ExtensionRelayBridge {
         typeof request.params?.url === "string" ? request.params.url : "",
       );
     }
+    const tab = this.tabs.get(route.tabId);
+    const unpublishedTask = tab && !tab.published && tab.taskGeneration ? tab : undefined;
+    const taskCommand =
+      unpublishedTask?.taskOwner === client &&
+      (request.method === "Page.navigate" ||
+        isTaskBootstrapCdpCommand(request.method, request.params));
+    if (unpublishedTask && !taskCommand) {
+      throw new Error(
+        `tab ${route.tabId} is still initializing and this client does not own an allowed bootstrap command`,
+      );
+    }
     const result = await this.callExtension({
       type: "cdp",
       tabId: route.tabId,
       ...(route.child ? { sessionId } : {}),
       method: request.method,
       params: request.params,
-      ...(request.method === "Page.navigate"
-        ? { taskGeneration: this.tabs.get(route.tabId)?.taskGeneration }
-        : {}),
+      ...(taskCommand ? { taskGeneration: unpublishedTask.taskGeneration } : {}),
     });
     this.respond(client, request, result);
   }
@@ -1258,6 +1278,7 @@ export class ExtensionRelayBridge {
           info: { tabId, url, title: "", active: !createParams.background, taskGeneration },
           published: false,
           taskGeneration,
+          taskOwner: client,
           attached,
           restoreAttachment: false,
         });

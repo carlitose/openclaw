@@ -154,6 +154,39 @@ describe("ExtensionRelayBridge task tabs", () => {
     }
     const sessionId = (attached.params as { sessionId?: string }).sessionId;
     expect(sessionId).toBeTruthy();
+    const otherClient = new FakeSocket();
+    const otherCdp = bridge.attachCdpClientSocket(otherClient);
+    otherCdp.onMessage(JSON.stringify({ id: 20, sessionId, method: "Page.enable" }));
+    await flush();
+    expect(otherClient.frames().find((frame) => frame.id === 20)?.error).toBeTruthy();
+
+    cdp.onMessage(
+      JSON.stringify({
+        id: 22,
+        sessionId,
+        method: "Runtime.evaluate",
+        params: { expression: "location.href='https://example.com'" },
+      }),
+    );
+    await flush();
+    expect(client.frames().find((frame) => frame.id === 22)?.error).toBeTruthy();
+    cdp.onMessage(
+      JSON.stringify({
+        id: 21,
+        sessionId,
+        method: "Page.enable",
+      }),
+    );
+    await flush();
+    expect(socket.frames()).toContainEqual(
+      expect.objectContaining({
+        type: "cdp",
+        tabId: 999,
+        method: "Page.enable",
+        taskGeneration: "task-generation-999",
+      }),
+    );
+    expect(client.frames().find((frame) => frame.id === 21)?.result).toMatchObject({ ok: true });
     cdp.onMessage(
       JSON.stringify({
         id: 3,
