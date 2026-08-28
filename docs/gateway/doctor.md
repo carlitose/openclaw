@@ -372,6 +372,12 @@ That stages grounded durable candidates into the short-term dreaming store while
     official Chrome Web Store extension. The unpacked stable path is a
     development fallback.
 
+    For extension profiles configured with `userDataDir` plus
+    `profileDirectory`, doctor reports the personal-profile launch boundary:
+    launch needs the current interactive desktop session, never copies or owns
+    the personal profile, and does not install or pair the extension. Windows
+    extension installation and pairing remain manual.
+
     Doctor also audits the host-local Chrome MCP path when you use `defaultProfile: "user"` or a configured `existing-session` profile:
 
     - checks whether Google Chrome is installed on the same host for default auto-connect profiles

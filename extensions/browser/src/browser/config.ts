@@ -117,6 +117,7 @@ export type ResolvedBrowserProfile = {
   cdpHost: string;
   cdpIsLoopback: boolean;
   userDataDir?: string;
+  profileDirectory?: string;
   mcpCommand?: string;
   mcpArgs?: string[];
   color: string;
@@ -536,6 +537,8 @@ export function resolveProfile(
       cdpUrl: relayCdpUrl,
       cdpHost: "127.0.0.1",
       cdpIsLoopback: true,
+      userDataDir: resolveUserPath(profile.userDataDir?.trim() || "") || undefined,
+      profileDirectory: normalizeOptionalString(profile.profileDirectory),
       color: DEFAULT_OPENCLAW_BROWSER_COLOR,
       driver,
       executablePath,

@@ -36,6 +36,12 @@ type ChromeForTestingInstall = {
   sha256: string;
 };
 
+type IsolationChromeLauncher = {
+  executablePath: string;
+  argumentsPath: string;
+  securePreferencesRestorePath: string;
+};
+
 function comparablePath(value: string): string {
   return path.resolve(value).toLocaleLowerCase("en-US");
 }
@@ -208,6 +214,96 @@ export async function installPinnedChromeForTesting(
     version,
     sha256,
   };
+}
+
+function chromeLauncherSource(): string {
+  return `using System;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+
+internal static class OpenClawIsolationChromeLauncher
+{
+    private static string Quote(string value)
+    {
+        if (value.IndexOf((char)34) >= 0) throw new InvalidDataException();
+        return new string((char)34, 1) + value + new string((char)34, 1);
+    }
+
+    public static int Main(string[] args)
+    {
+        if (args.Length != 2 ||
+            !args[0].StartsWith("--user-data-dir=", StringComparison.Ordinal) ||
+            !args[1].StartsWith("--profile-directory=", StringComparison.Ordinal))
+            return 2;
+
+        string chrome = Environment.GetEnvironmentVariable("OPENCLAW_ISOLATION_CHROME_EXE");
+        string extension = Environment.GetEnvironmentVariable("OPENCLAW_ISOLATION_EXTENSION_DIR");
+        string argumentsPath = Environment.GetEnvironmentVariable("OPENCLAW_ISOLATION_LAUNCH_ARGS");
+        string taskRoot = Environment.GetEnvironmentVariable("OPENCLAW_ISOLATION_ROOT");
+        string restorePath = Environment.GetEnvironmentVariable("OPENCLAW_ISOLATION_SECURE_PREFERENCES_RESTORE");
+        if (String.IsNullOrWhiteSpace(chrome) || String.IsNullOrWhiteSpace(extension) ||
+            String.IsNullOrWhiteSpace(argumentsPath) || String.IsNullOrWhiteSpace(taskRoot) ||
+            String.IsNullOrWhiteSpace(restorePath))
+            return 3;
+
+        File.WriteAllLines(argumentsPath, args, new System.Text.UTF8Encoding(false));
+        string prefix = Path.GetFullPath(taskRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string restore = Path.GetFullPath(restorePath);
+        string userDataDir = Path.GetFullPath(args[0].Substring("--user-data-dir=".Length));
+        string profileDirectory = args[1].Substring("--profile-directory=".Length);
+        string preferences = Path.GetFullPath(Path.Combine(userDataDir, profileDirectory, "Secure Preferences"));
+        if (!restore.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+            !preferences.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            return 4;
+        File.Copy(restore, preferences, true);
+        string[] chromeArgs = args.Concat(new[] {
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-background-networking",
+            "--disable-component-update",
+            "--disable-sync",
+            "--headless=new",
+            "--window-size=1280,900",
+            "--disable-extensions-except=" + extension,
+            "--load-extension=" + extension,
+            "about:blank"
+        }).ToArray();
+        ProcessStartInfo start = new ProcessStartInfo {
+            FileName = chrome,
+            Arguments = String.Join(" ", chromeArgs.Select(Quote)),
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        Process.Start(start);
+        return 0;
+    }
+}
+`;
+}
+
+export async function compileIsolationChromeLauncher(
+  taskRoot: string,
+): Promise<IsolationChromeLauncher> {
+  const directory = path.join(taskRoot, "chrome-launcher");
+  const sourcePath = path.join(directory, "OpenClawIsolationChromeLauncher.cs");
+  const executablePath = path.join(directory, "openclaw-isolation-chrome.exe");
+  const argumentsPath = path.join(directory, "arguments.txt");
+  const securePreferencesRestorePath = path.join(directory, "Secure Preferences.restore");
+  await fs.mkdir(directory, { recursive: true });
+  await fs.writeFile(sourcePath, chromeLauncherSource(), { encoding: "utf8", flag: "wx" });
+  const script =
+    "Add-Type -Path $env:OPENCLAW_CHROME_LAUNCHER_SOURCE -OutputAssembly $env:OPENCLAW_CHROME_LAUNCHER_EXE -OutputType ConsoleApplication";
+  await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    env: {
+      ...process.env,
+      OPENCLAW_CHROME_LAUNCHER_SOURCE: sourcePath,
+      OPENCLAW_CHROME_LAUNCHER_EXE: executablePath,
+    },
+    windowsHide: true,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  return { executablePath, argumentsPath, securePreferencesRestorePath };
 }
 
 function nativeHostSource(expectedOrigin: string): string {
@@ -468,4 +564,34 @@ export async function waitForCandidateExtensionPreference(params: {
     });
   }
   throw new Error("candidate extension did not appear in the disposable Chrome profile");
+}
+
+export async function markCandidateExtensionAsManuallyInstalled(params: {
+  profileDir: string;
+  extensionId: string;
+  extensionDir: string;
+  restorePath: string;
+}): Promise<void> {
+  const preferencePath = path.join(params.profileDir, "Default", "Secure Preferences");
+  const original = await fs.readFile(preferencePath);
+  const parsed: unknown = JSON.parse(original.toString("utf8"));
+  const settings = (parsed as { extensions?: { settings?: Record<string, unknown> } })?.extensions
+    ?.settings;
+  const entry = settings?.[params.extensionId] as
+    | { location?: unknown; path?: unknown }
+    | undefined;
+  if (
+    entry?.location !== CHROME_EXTENSION_COMMAND_LINE_LOCATION ||
+    typeof entry.path !== "string" ||
+    comparablePath(entry.path) !== comparablePath(params.extensionDir)
+  ) {
+    throw new Error("candidate extension preference changed before cold-launch setup");
+  }
+
+  // Headless Chrome can bootstrap an unpacked MV3 extension only from the command line.
+  // The product cold-launch boundary accepts only the manual-install record that this
+  // disposable profile represents; command-line-only extensions remain rejected.
+  await fs.writeFile(params.restorePath, original, { flag: "wx" });
+  entry.location = 4;
+  await fs.writeFile(preferencePath, JSON.stringify(parsed), "utf8");
 }

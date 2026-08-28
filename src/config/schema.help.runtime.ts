@@ -28,7 +28,9 @@ export const RUNTIME_FIELD_HELP: Record<string, string> = {
   "browser.profiles.*.cdpUrl":
     "Per-profile CDP/DevTools endpoint URL used for explicit browser routing by profile name. Use this for remote CDP hosts, tunnels, or existing-session profiles that should attach through a running Chrome DevTools endpoint.",
   "browser.profiles.*.userDataDir":
-    "Per-profile Chromium user data directory for existing-session attachment through Chrome DevTools MCP. Use this for Brave, Edge, Chromium, or non-default Chrome profiles when the built-in auto-connect path would pick the wrong browser data directory on the selected host or browser node. Paths starting with ~ expand to the OS home directory.",
+    "Per-profile Chromium user data directory for existing-session attachment or an explicitly configured extension-profile launch. Extension launch also requires profileDirectory. Paths starting with ~ expand to the OS home directory.",
+  "browser.profiles.*.profileDirectory":
+    'Exact Chrome profile directory name inside userDataDir (for example "Default" or "Profile 3"). Supported only for extension profiles and enables OpenClaw to open that existing personal profile when its relay is disconnected.',
   "browser.profiles.*.mcpCommand":
     "Per-profile Chrome DevTools MCP command for existing-session attachment. Defaults to npx.",
   "browser.profiles.*.mcpArgs":
@@ -36,7 +38,7 @@ export const RUNTIME_FIELD_HELP: Record<string, string> = {
   "browser.profiles.*.driver":
     'Per-profile browser driver mode. Use "openclaw" (or legacy "clawd") for CDP-based profiles, "existing-session" for Chrome DevTools MCP attachment, or "extension" for the authenticated Chrome extension relay.',
   "browser.profiles.*.executablePath":
-    "Per-profile browser executable path for locally launched managed browser profiles. Overrides browser.executablePath and accepts paths starting with ~ for the OS home directory.",
+    "Per-profile browser executable path for locally launched managed profiles or configured extension-profile launch. Overrides browser.executablePath and accepts paths starting with ~ for the OS home directory.",
   "browser.profiles.*.headless":
     "Per-profile headless override for locally launched browser instances. Use this when one profile should stay headless without forcing browser.headless for every other profile.",
   "browser.profiles.*.attachOnly":

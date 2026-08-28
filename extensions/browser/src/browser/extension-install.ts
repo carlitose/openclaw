@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { resolveStateDir } from "openclaw/plugin-sdk/state-paths";
 import {
   assertOwnedPath,
@@ -16,6 +17,7 @@ import {
   inspectInstalledCopy,
   installStableChromeExtension,
   pathInfo,
+  resolveBundledChromeExtensionDir,
   stableChromeExtensionDir,
 } from "./extension-install-layout.js";
 import { BROWSER_NATIVE_HOST_NAME } from "./extension-native-host.js";
@@ -28,8 +30,14 @@ const NATIVE_HOST_DESCRIPTION = "OpenClaw browser extension bootstrap";
 // Chrome authorizes native messaging by extension ID. This trust grant intentionally
 // includes user-loaded unpacked builds that preserve the Store ID; those builds must be trusted.
 // The ID is never proof that an arbitrary extension path is OpenClaw-owned.
-const FOUNDATION_CHROME_WEB_STORE_EXTENSION_ID = "kcdjddhmeafeomebliikmbpblkmkfoig";
+export const FOUNDATION_CHROME_WEB_STORE_EXTENSION_ID = "kcdjddhmeafeomebliikmbpblkmkfoig";
 export const FOUNDATION_CHROME_WEB_STORE_URL = `https://chromewebstore.google.com/detail/openclaw/${FOUNDATION_CHROME_WEB_STORE_EXTENSION_ID}`;
+
+// Resolve once per process. Source, unified dist, and package-local dist place
+// browser modules at different depths while package.json remains the owner marker.
+export const BUNDLED_CHROME_EXTENSION_DIR = resolveBundledChromeExtensionDir(
+  fileURLToPath(import.meta.url),
+);
 
 type NativeHostRegistrationStatus = {
   product: ChromeProduct;
@@ -377,6 +385,28 @@ async function approvedInstallRealpaths(installed: string, bundled: string): Pro
   return [...new Set([installedPath, bundledPath])];
 }
 
+/** Resolve only OpenClaw-owned unpacked paths plus the fixed Store identity inspection inputs. */
+export async function resolveChromeExtensionInspectionPaths(
+  bundledDir: string,
+  deps: ExtensionInstallDeps = {},
+): Promise<{
+  installedPath: string;
+  installedCopy: Awaited<ReturnType<typeof inspectInstalledCopy>>;
+  approvedPaths: string[];
+}> {
+  const installedPath = stableChromeExtensionDir(deps);
+  const installedCopy = await inspectInstalledCopy(installedPath);
+  const bundledPath = await fs.realpath(bundledDir);
+  await assertOwnedPath(bundledPath, "directory", { allowRootOwner: true });
+  return {
+    installedPath,
+    installedCopy,
+    approvedPaths: installedCopy.owned
+      ? await approvedInstallRealpaths(installedPath, bundledPath)
+      : [bundledPath],
+  };
+}
+
 export function normalizeExtensionInstallWaitMs(value: unknown): number {
   if (value === undefined) {
     return BROWSER_EXTENSION_INSTALL_WAIT_DEFAULT_MS;
@@ -490,13 +520,8 @@ export async function browserExtensionStatus(params: {
 }): Promise<BrowserExtensionStatus> {
   const deps = params.deps ?? {};
   const platform = deps.platform ?? process.platform;
-  const installedPath = stableChromeExtensionDir(deps);
-  const installedCopy = await inspectInstalledCopy(installedPath);
-  const bundledPath = await fs.realpath(params.bundledDir);
-  await assertOwnedPath(bundledPath, "directory", { allowRootOwner: true });
-  const approvedPaths = installedCopy.owned
-    ? await approvedInstallRealpaths(installedPath, bundledPath)
-    : [bundledPath];
+  const { installedPath, installedCopy, approvedPaths } =
+    await resolveChromeExtensionInspectionPaths(params.bundledDir, deps);
   const discovery = await discoverChromeExtensionIds({
     approvedDirs: approvedPaths,
     storeExtensionId: FOUNDATION_CHROME_WEB_STORE_EXTENSION_ID,

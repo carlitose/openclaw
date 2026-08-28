@@ -141,6 +141,7 @@ describe("browser doctor readiness", () => {
   it("warns about legacy clawd managed browser profile residue", async () => {
     const noteFn = vi.fn();
     const configDir = "/tmp/openclaw-home";
+    const legacyUserDataDir = path.join(configDir, "browser", "clawd", "user-data");
 
     await noteChromeMcpBrowserReadiness(
       {
@@ -157,7 +158,7 @@ describe("browser doctor readiness", () => {
         env: { DISPLAY: ":99" },
         getUid: () => 1000,
         configDir,
-        pathExists: (targetPath) => targetPath.endsWith("/browser/clawd/user-data"),
+        pathExists: (targetPath) => targetPath === legacyUserDataDir,
         resolveManagedExecutable: () => ({ kind: "chrome", path: "/usr/bin/google-chrome" }),
       },
     );
@@ -165,8 +166,8 @@ describe("browser doctor readiness", () => {
     expect(noteFn).toHaveBeenCalledTimes(1);
     const note = requireFirstNoteText(noteFn);
     expect(note).toContain("Legacy managed browser profile residue");
-    expect(note).toContain("/tmp/openclaw-home/browser/clawd");
-    expect(note).toContain("/tmp/openclaw-home/browser/openclaw/user-data");
+    expect(note).toContain(path.join(configDir, "browser", "clawd"));
+    expect(note).toContain(path.join(configDir, "browser", "openclaw", "user-data"));
     expect(note).toContain("openclaw doctor --fix");
   });
 
@@ -304,17 +305,42 @@ describe("browser doctor readiness", () => {
     const note = requireNoteTextContaining(noteFn, "explicit Chromium user data directory");
     expect(note).toContain("brave://inspect/#remote-debugging");
   });
+
+  it("explains the interactive and manual boundaries for extension profile launch", async () => {
+    const noteFn = vi.fn();
+    await noteChromeMcpBrowserReadiness(
+      {
+        browser: {
+          extensionRelay: { allowLegacyAuth: false },
+          profiles: {
+            personal: {
+              driver: "extension",
+              userDataDir: "C:\\Users\\operator\\Chrome Data",
+              profileDirectory: "Profile 3",
+            },
+          },
+        },
+      },
+      {
+        noteFn,
+        platform: "win32",
+        configDir: "C:\\missing-openclaw-test-state",
+        resolveManagedExecutable: () => {
+          throw new Error("extension profiles are not managed profiles");
+        },
+      },
+    );
+
+    const message = requireNoteTextContaining(noteFn, "Extension profile launch is configured");
+    expect(message).toContain("current interactive desktop session");
+    expect(message).toContain("does not copy, stop, restart, or repair");
+    expect(message).toContain("On Windows, extension installation and pairing remain manual");
+  });
 });
 
 describe("browser plugin package layout", () => {
-  async function expectRepairLayout(layout: "source" | "built") {
+  it("passes the canonical bundled extension and plugin root to repair", async () => {
     const packageRoot = fs.realpathSync(tempDirs.make("openclaw-browser-doctor-"));
-    const moduleDir = layout === "source" ? path.join(packageRoot, "src") : packageRoot;
-    const modulePath = path.join(
-      moduleDir,
-      layout === "source" ? "doctor-browser.ts" : "browser-doctor.js",
-    );
-    fs.mkdirSync(moduleDir, { recursive: true });
     fs.writeFileSync(path.join(packageRoot, "package.json"), "{}");
 
     const repairOwnedChromeExtensionNativeHosts = vi.fn(async () => ({
@@ -322,11 +348,8 @@ describe("browser plugin package layout", () => {
       warnings: [],
     }));
     vi.resetModules();
-    vi.doMock("node:url", async () => ({
-      ...(await vi.importActual<typeof import("node:url")>("node:url")),
-      fileURLToPath: () => modulePath,
-    }));
     vi.doMock("./browser/extension-install.js", () => ({
+      BUNDLED_CHROME_EXTENSION_DIR: path.join(packageRoot, "chrome-extension"),
       browserExtensionStatus: vi.fn(),
       FOUNDATION_CHROME_WEB_STORE_URL: "https://example.invalid",
       repairOwnedChromeExtensionNativeHosts,
@@ -340,24 +363,18 @@ describe("browser plugin package layout", () => {
         pluginRoot: packageRoot,
       });
     } finally {
-      vi.doUnmock("node:url");
       vi.doUnmock("./browser/extension-install.js");
       vi.resetModules();
     }
-  }
-
-  it("resolves assets from the source package root", async () => {
-    await expectRepairLayout("source");
-  });
-
-  it("resolves assets from the built package root", async () => {
-    await expectRepairLayout("built");
   });
 });
 
 describe("legacy clawd browser profile cleanup", () => {
   it("archives stale clawd residue with the safe trash mover", async () => {
     const movePathToTrash = vi.fn(async () => "/tmp/openclaw-home/browser/.trash/clawd");
+    const configDir = "/tmp/openclaw-home";
+    const legacyProfileDir = path.join(configDir, "browser", "clawd");
+    const legacyUserDataDir = path.join(legacyProfileDir, "user-data");
 
     const result = await maybeArchiveLegacyClawdBrowserProfileResidue(
       {
@@ -368,18 +385,20 @@ describe("legacy clawd browser profile cleanup", () => {
         },
       },
       {
-        configDir: "/tmp/openclaw-home",
-        pathExists: (targetPath) => targetPath.endsWith("/browser/clawd/user-data"),
+        configDir,
+        pathExists: (targetPath) => targetPath === legacyUserDataDir,
         movePathToTrash,
       },
     );
 
-    expect(movePathToTrash).toHaveBeenCalledWith("/tmp/openclaw-home/browser/clawd");
+    expect(movePathToTrash).toHaveBeenCalledWith(legacyProfileDir);
     expect(result.warnings).toStrictEqual([]);
     expect(result.changes.join("\n")).toContain(
       "Archived legacy clawd managed browser profile residue.",
     );
-    expect(result.changes.join("\n")).toContain("/tmp/openclaw-home/browser/openclaw/user-data");
+    expect(result.changes.join("\n")).toContain(
+      path.join(configDir, "browser", "openclaw", "user-data"),
+    );
   });
 
   it("does not archive a configured clawd browser profile", async () => {

@@ -5,12 +5,16 @@ import http, { type Server } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { createOpenClawTestState, type OpenClawTestState } from "openclaw/plugin-sdk/test-state";
+import {
+  createOpenClawTestState,
+  getDeterministicFreePortBlock,
+  type OpenClawTestState,
+} from "openclaw/plugin-sdk/test-state";
 import { chromeProductRoots } from "../../../extensions/browser/src/browser/extension-install-layout.js";
 
-const DEFAULT_GATEWAY_PORT = 18_789;
 const PROCESS_EXIT_TIMEOUT_MS = 5_000;
 const PORT_RELEASE_TIMEOUT_MS = 5_000;
+const PROCESS_EXIT_QUIET_MS = 250;
 const execFileAsync = promisify(execFile);
 
 type FixtureUrls = {
@@ -56,6 +60,7 @@ export type PersonalChromeIsolationTask = {
     role: "gateway" | "chrome";
     command?: readonly string[];
   }) => void;
+  stopChromeProcesses: () => Promise<void>;
   cleanup: () => Promise<void>;
 };
 
@@ -114,34 +119,7 @@ function defaultProtectedPaths(): string[] {
 }
 
 async function allocateGatewayPort(): Promise<number> {
-  for (let attempt = 0; attempt < 25; attempt += 1) {
-    const port = await getFreePort();
-    if (
-      port !== DEFAULT_GATEWAY_PORT &&
-      port <= 65_525 &&
-      (await isPortFree(port + 2)) &&
-      (await isPortFree(port + 10))
-    ) {
-      return port;
-    }
-  }
-  throw new Error("failed to acquire isolated Gateway and relay ports");
-}
-
-async function getFreePort(): Promise<number> {
-  return await new Promise((resolve, reject) => {
-    const server = http.createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        server.close();
-        reject(new Error("failed to acquire a free port"));
-        return;
-      }
-      server.close((error) => (error ? reject(error) : resolve(address.port)));
-    });
-  });
+  return await getDeterministicFreePortBlock({ offsets: [0, 2, 10] });
 }
 
 async function isPortFree(port: number): Promise<boolean> {
@@ -188,7 +166,12 @@ async function stopProcess(child: ChildProcess): Promise<void> {
   }
 }
 
-type ProcessCommand = { pid: number; commandLine: string };
+type ProcessCommand = {
+  pid: number;
+  parentPid?: number;
+  name?: string;
+  commandLine: string;
+};
 
 function hasExactCommandLineProfileMarker(commandLine: string, profileDir: string): boolean {
   const marker = "--user-data-dir=";
@@ -208,7 +191,7 @@ function hasExactCommandLineProfileMarker(commandLine: string, profileDir: strin
 async function windowsProcessCommands(profileDir: string): Promise<ProcessCommand[]> {
   const script = [
     "$profile = [Environment]::GetEnvironmentVariable('OPENCLAW_ISOLATION_PROFILE')",
-    "$items = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($profile, [StringComparison]::OrdinalIgnoreCase) -ge 0 } | ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; commandLine = [string]$_.CommandLine } })",
+    "$items = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($profile, [StringComparison]::OrdinalIgnoreCase) -ge 0 } | ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; parentPid = [int]$_.ParentProcessId; name = [string]$_.Name; commandLine = [string]$_.CommandLine } })",
     "$items | ConvertTo-Json -Compress",
   ].join("; ");
   const { stdout } = await execFileAsync(
@@ -266,6 +249,73 @@ function killProcessId(pid: number, signal: NodeJS.Signals): void {
   }
 }
 
+async function forceStopWindowsTaskProfileProcessesOnce(profileDir: string): Promise<void> {
+  const script = [
+    "$profile = [Environment]::GetEnvironmentVariable('OPENCLAW_ISOLATION_PROFILE')",
+    "$escaped = [Regex]::Escape($profile)",
+    "$pattern = '--user-data-dir=(?:\"' + $escaped + '\"|' + $escaped + ')(?=[\"\\s]|$)'",
+    "$observed = @{}",
+    "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and [Regex]::IsMatch($_.CommandLine, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase) } | ForEach-Object { $observed[[int]$_.ProcessId] = $true }",
+    "$current = @(Get-CimInstance Win32_Process | Where-Object { $observed.ContainsKey([int]$_.ProcessId) -and $_.CommandLine -and [Regex]::IsMatch($_.CommandLine, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase) })",
+    "foreach ($item in $current) { Stop-Process -Id ([int]$item.ProcessId) -Force -ErrorAction SilentlyContinue }",
+    "exit 0",
+  ].join("; ");
+  await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    env: { ...process.env, OPENCLAW_ISOLATION_PROFILE: profileDir },
+    windowsHide: true,
+    maxBuffer: 1024 * 1024,
+  });
+}
+
+async function forceStopWindowsTaskProfileProcesses(profileDir: string): Promise<void> {
+  const terminationDeadline = Date.now() + PROCESS_EXIT_TIMEOUT_MS;
+  let quietSince: number | undefined;
+  let lastRemaining: ProcessCommand[] = [];
+  while (Date.now() < terminationDeadline) {
+    const remaining = await taskProfileProcessCommands(profileDir);
+    lastRemaining = remaining;
+    if (remaining.length === 0) {
+      quietSince ??= Date.now();
+      if (Date.now() - quietSince >= PROCESS_EXIT_QUIET_MS) {
+        return;
+      }
+    } else {
+      quietSince = undefined;
+      // Chrome may fork after its parent appears to exit. Re-read the exact task
+      // profile until the process tree stays empty, never broadening PID ownership.
+      await forceStopWindowsTaskProfileProcessesOnce(profileDir);
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 25);
+    });
+  }
+
+  // Windows can publish a final child after its parent has been terminated.
+  // Drain those exact late PIDs, then require one uninterrupted quiet window.
+  const settleDeadline = Date.now() + PROCESS_EXIT_TIMEOUT_MS;
+  quietSince = undefined;
+  while (Date.now() < settleDeadline) {
+    const remaining = await taskProfileProcessCommands(profileDir);
+    lastRemaining = remaining;
+    if (remaining.length === 0) {
+      quietSince ??= Date.now();
+      if (Date.now() - quietSince >= PROCESS_EXIT_QUIET_MS) {
+        return;
+      }
+    } else {
+      quietSince = undefined;
+      await forceStopWindowsTaskProfileProcessesOnce(profileDir);
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 25);
+    });
+  }
+  const processSummary = lastRemaining
+    .map((entry) => `${entry.name ?? "process"}:${entry.pid}<-${entry.parentPid ?? "unknown"}`)
+    .join(", ");
+  throw new Error(`task-owned Chrome processes remained after forced cleanup: ${processSummary}`);
+}
+
 async function stopTaskProfileProcesses(
   profileDir: string,
   trackedChrome: readonly TrackedProcess[],
@@ -283,23 +333,29 @@ async function stopTaskProfileProcesses(
       throw new Error(`refusing to terminate Chrome PID ${pid} without its task profile marker`);
     }
   }
-  for (const processCommand of initial) {
-    killProcessId(processCommand.pid, "SIGTERM");
-  }
-
-  const deadline = Date.now() + PROCESS_EXIT_TIMEOUT_MS;
-  let remaining = await taskProfileProcessCommands(profileDir);
-  while (remaining.length > 0 && Date.now() < deadline) {
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 25);
-    });
-    remaining = await taskProfileProcessCommands(profileDir);
-  }
-  for (const processCommand of remaining) {
-    killProcessId(processCommand.pid, "SIGKILL");
-  }
-  if ((await taskProfileProcessCommands(profileDir)).length > 0) {
-    throw new Error("task-owned Chrome processes remained after forced cleanup");
+  if (process.platform === "win32") {
+    // Close harness-spawned roots through their exact child handles first.
+    // The profile reaper then owns only detached or late Chrome descendants.
+    await Promise.all(trackedChrome.map(async (tracked) => await stopProcess(tracked.child)));
+    await forceStopWindowsTaskProfileProcesses(profileDir);
+  } else {
+    for (const processCommand of initial) {
+      killProcessId(processCommand.pid, "SIGTERM");
+    }
+    const deadline = Date.now() + PROCESS_EXIT_TIMEOUT_MS;
+    let remaining = await taskProfileProcessCommands(profileDir);
+    while (remaining.length > 0 && Date.now() < deadline) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 25);
+      });
+      remaining = await taskProfileProcessCommands(profileDir);
+    }
+    for (const processCommand of remaining) {
+      killProcessId(processCommand.pid, "SIGKILL");
+    }
+    if ((await taskProfileProcessCommands(profileDir)).length > 0) {
+      throw new Error("task-owned Chrome processes remained after forced cleanup");
+    }
   }
   await Promise.all(trackedChrome.map(async (tracked) => await waitForProcessExit(tracked.child)));
 }
@@ -468,26 +524,32 @@ export async function createPersonalChromeIsolationTask(
     cleaned = true;
     const cleanupErrors: unknown[] = [];
 
+    const tracked = trackedProcesses.splice(0).toReversed();
+    const trackedChrome = tracked.filter((processEntry) => processEntry.role === "chrome");
+    // Gateway owns cold relaunch. Quiesce that producer before collecting the
+    // detached Chrome tree, or an in-flight request can repopulate the profile.
+    for (const processEntry of tracked.filter((entry) => entry.role === "gateway")) {
+      try {
+        await stopProcess(processEntry.child);
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    let chromeCleanupPassed = true;
+    try {
+      // The extension-profile launcher deliberately releases its process handle.
+      // The exact temporary --user-data-dir remains the cleanup authority.
+      await stopTaskProfileProcesses(profileDir, trackedChrome);
+    } catch (error) {
+      chromeCleanupPassed = false;
+      cleanupErrors.push(error);
+    }
+    // Browser pages can retain active fixture connections. Stop every task-owned
+    // client before closing its servers, or failure cleanup can wait forever.
     for (const fixture of fixtureServers.splice(0).toReversed()) {
       try {
         await closeServer(fixture.server);
         await waitForPortRelease(fixture.port);
-      } catch (error) {
-        cleanupErrors.push(error);
-      }
-    }
-    const tracked = trackedProcesses.splice(0).toReversed();
-    const trackedChrome = tracked.filter((processEntry) => processEntry.role === "chrome");
-    if (trackedChrome.length > 0) {
-      try {
-        await stopTaskProfileProcesses(profileDir, trackedChrome);
-      } catch (error) {
-        cleanupErrors.push(error);
-      }
-    }
-    for (const processEntry of tracked.filter((entry) => entry.role === "gateway")) {
-      try {
-        await stopProcess(processEntry.child);
       } catch (error) {
         cleanupErrors.push(error);
       }
@@ -497,10 +559,16 @@ export async function createPersonalChromeIsolationTask(
     } catch (error) {
       cleanupErrors.push(error);
     }
-    try {
-      await state.cleanup();
-    } catch (error) {
-      cleanupErrors.push(error);
+    if (chromeCleanupPassed) {
+      try {
+        await state.cleanup();
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    } else {
+      cleanupErrors.push(
+        new Error("retained the temporary task root because task-owned Chrome cleanup failed"),
+      );
     }
     if (cleanupErrors.length > 0) {
       throw new AggregateError(cleanupErrors, "personal Chrome isolation cleanup failed");
@@ -536,6 +604,15 @@ export async function createPersonalChromeIsolationTask(
         throw new Error("Chrome process command does not contain the exact temporary profile path");
       }
       trackedProcesses.push({ child, role });
+    },
+    stopChromeProcesses: async () => {
+      const trackedChrome = trackedProcesses.filter((entry) => entry.role === "chrome");
+      await stopTaskProfileProcesses(profileDir, trackedChrome);
+      for (let index = trackedProcesses.length - 1; index >= 0; index -= 1) {
+        if (trackedProcesses[index]?.role === "chrome") {
+          trackedProcesses.splice(index, 1);
+        }
+      }
     },
     cleanup,
   };

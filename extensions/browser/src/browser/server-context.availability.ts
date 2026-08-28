@@ -27,6 +27,7 @@ import {
 } from "./chrome.js";
 import type { ResolvedBrowserProfile } from "./config.js";
 import { BROWSER_ERROR_REASONS, BrowserProfileUnavailableError } from "./errors.js";
+import { getExtensionProfileLaunchModule } from "./extension-profile-launch.runtime.js";
 import { getExtensionRelayModule } from "./extension-relay.runtime.js";
 import { getBrowserProfileCapabilities } from "./profile-capabilities.js";
 import {
@@ -78,6 +79,18 @@ type BrowserEnsureOptions = {
   headless?: boolean;
   signal?: AbortSignal;
 };
+
+function extensionProfileUnavailable(
+  profile: ResolvedBrowserProfile,
+  reason:
+    | typeof BROWSER_ERROR_REASONS.profileNotConfigured
+    | typeof BROWSER_ERROR_REASONS.relayTimeout,
+  message: string,
+): BrowserProfileUnavailableError {
+  return new BrowserProfileUnavailableError(message, {
+    metadata: { reason, details: { profile: profile.name } },
+  });
+}
 
 const MANAGED_LAUNCH_FAILURE_THRESHOLD = 3;
 const MANAGED_LAUNCH_COOLDOWN_BASE_MS = 30_000;
@@ -457,10 +470,14 @@ export function createProfileAvailability({
     if (capabilities.mode === "local-extension") {
       const { ensureExtensionRelayForProfile } = await getExtensionRelayModule();
       const relay = await ensureExtensionRelayForProfile(current, profile, signal);
-      const connected = await relay.bridge.waitForExtensionConnection(
-        signal,
-        CHROME_MCP_ATTACH_READY_WINDOW_MS,
-      );
+      const hasLaunchSelection = Boolean(profile.userDataDir && profile.profileDirectory);
+      const connected =
+        relay.bridge.extensionConnected ||
+        (!hasLaunchSelection &&
+          (await relay.bridge.waitForExtensionConnection(
+            signal,
+            CHROME_MCP_ATTACH_READY_WINDOW_MS,
+          )));
       signal.throwIfAborted();
       httpReachable =
         connected &&
@@ -479,6 +496,45 @@ export function createProfileAvailability({
           return;
         }
       }
+      if (capabilities.mode === "local-extension") {
+        const { EXTENSION_PAIRING_HINT, ensureExtensionRelayForProfile } =
+          await getExtensionRelayModule();
+        if (!profile.userDataDir || !profile.profileDirectory) {
+          throw extensionProfileUnavailable(
+            profile,
+            BROWSER_ERROR_REASONS.profileNotConfigured,
+            `Extension profile "${profile.name}" is not connected and has no exact Chrome launch selection. Configure userDataDir plus profileDirectory, or open Chrome manually. ${EXTENSION_PAIRING_HINT}`,
+          );
+        }
+        const { ensureExtensionProfileLaunched } = await getExtensionProfileLaunchModule();
+        await ensureExtensionProfileLaunched({
+          resolved: current.resolved,
+          profile,
+          runtime,
+          signal,
+        });
+        const relay = await ensureExtensionRelayForProfile(current, profile, signal);
+        const connected =
+          relay.bridge.extensionConnected ||
+          (await relay.bridge.waitForExtensionConnection(
+            signal,
+            current.resolved.localLaunchTimeoutMs,
+          ));
+        signal.throwIfAborted();
+        if (
+          connected &&
+          current.extensionRelays?.get(profile.name) === relay &&
+          (await isHttpReachable(undefined, signal)) &&
+          current.extensionRelays?.get(profile.name) === relay
+        ) {
+          return;
+        }
+        throw extensionProfileUnavailable(
+          profile,
+          BROWSER_ERROR_REASONS.relayTimeout,
+          `Chrome opened for extension profile "${profile.name}", but its authenticated OpenClaw relay did not become ready before the launch timeout. Check the extension popup and pairing, then retry.`,
+        );
+      }
       // Browser control service can restart while a loopback OpenClaw browser is still
       // alive. Give that pre-existing browser one longer probe window before falling
       // back to local executable resolution.
@@ -492,13 +548,6 @@ export function createProfileAvailability({
         }
       }
       if (attachOnly || remoteCdp) {
-        if (capabilities.mode === "local-extension") {
-          const { EXTENSION_PAIRING_HINT } = await getExtensionRelayModule();
-          throw new BrowserProfileUnavailableError(
-            `The OpenClaw Chrome extension is not connected for profile "${profile.name}". ` +
-              `Open Chrome on this machine and check the extension popup shows "Connected". ${EXTENSION_PAIRING_HINT}`,
-          );
-        }
         throw new BrowserProfileUnavailableError(
           remoteCdp
             ? `Remote CDP for profile "${profile.name}" is not reachable at ${redactedProfileCdpUrl}.`
@@ -549,8 +598,10 @@ export function createProfileAvailability({
       }
       if (capabilities.mode === "local-extension") {
         const { EXTENSION_PAIRING_HINT } = await getExtensionRelayModule();
-        throw new BrowserProfileUnavailableError(
-          `The extension relay for profile "${profile.name}" is running but the OpenClaw Chrome extension is not connected. ${EXTENSION_PAIRING_HINT}`,
+        throw extensionProfileUnavailable(
+          profile,
+          BROWSER_ERROR_REASONS.relayTimeout,
+          `The extension relay for profile "${profile.name}" is running but the authenticated OpenClaw Chrome extension is not ready. ${EXTENSION_PAIRING_HINT}`,
         );
       }
       const detail = await describeCdpFailure(PROFILE_ATTACH_RETRY_TIMEOUT_MS);

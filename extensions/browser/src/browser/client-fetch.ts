@@ -23,21 +23,17 @@ import { isLoopbackHost } from "../gateway/net.js";
 import { getBridgeAuthForPort } from "./bridge-auth-registry.js";
 import { resolveBrowserConfig, resolveProfile } from "./config.js";
 import { resolveBrowserControlAuth } from "./control-auth.js";
-import {
-  parseBrowserErrorPayload,
-  type BrowserNoDisplayErrorMetadata,
-  type BrowserNoDisplayErrorDetails,
-} from "./errors.js";
+import { parseBrowserErrorPayload, type BrowserProfileUnavailableErrorMetadata } from "./errors.js";
 import { resolveBrowserRateLimitMessage } from "./rate-limit-message.js";
 
 // Application-level error from the browser control service (service is reachable
 // but returned an error response). Must NOT be wrapped with "Can't reach ..." messaging.
 export class BrowserServiceError extends Error {
   readonly status?: number;
-  readonly reason?: BrowserNoDisplayErrorMetadata["reason"];
-  readonly details?: BrowserNoDisplayErrorDetails;
+  readonly reason?: BrowserProfileUnavailableErrorMetadata["reason"];
+  readonly details?: BrowserProfileUnavailableErrorMetadata["details"];
 
-  constructor(message: string, metadata?: BrowserNoDisplayErrorMetadata, status?: number) {
+  constructor(message: string, metadata?: BrowserProfileUnavailableErrorMetadata, status?: number) {
     super(message);
     this.name = "BrowserServiceError";
     this.status = status;

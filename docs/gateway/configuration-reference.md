@@ -442,6 +442,11 @@ See [Plugins](/tools/plugin).
         executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       },
       chrome: { driver: "extension" },
+      personal: {
+        driver: "extension",
+        userDataDir: "C:\\Users\\operator\\AppData\\Local\\Google\\Chrome\\User Data",
+        profileDirectory: "Profile 3",
+      },
       user: { driver: "existing-session", attachOnly: true },
       brave: {
         driver: "existing-session",
@@ -497,6 +502,12 @@ See [Plugins](/tools/plugin).
 - `extension` profiles use the authenticated OpenClaw Chrome extension relay.
   The relay owns its loopback endpoint, so these profiles do not accept
   `cdpUrl`. See [Chrome extension](/tools/chrome-extension).
+- An `extension` profile can set `userDataDir` together with
+  `profileDirectory` to open that exact existing Chrome profile when its relay
+  is disconnected. Set both fields or neither. OpenClaw does not guess a
+  profile, copy its data, stop personal Chrome, or install/pair the extension.
+  The launch runs only in the current interactive desktop session; Windows
+  extension installation and pairing remain manual.
 - `existing-session` profiles can set `userDataDir` to target a specific
   Chromium-based browser profile such as Brave or Edge.
 - `existing-session` profiles can set `cdpUrl` when Chrome is already running
@@ -511,13 +522,13 @@ See [Plugins](/tools/plugin).
   range when OpenClaw creates the profile. A profile you declare by hand must
   set `cdpPort` itself, or `cdpUrl` for a remote CDP endpoint; the schema
   rejects an `openclaw` or `clawd` profile that sets neither.
-- Local managed profiles can set `executablePath` to override the global
-  `browser.executablePath` for that profile. Use this to run one profile in
-  Chrome and another in Brave.
+- Local managed profiles and configured extension-profile launch can set
+  `executablePath` to override the global `browser.executablePath` for that
+  profile. Use this to select the exact Chromium-family binary.
 - Auto-detect order: default browser if Chromium-based → Chrome → Brave → Edge → Chromium → Chrome Canary.
 - `browser.executablePath` and `browser.profiles.<name>.executablePath` both
   accept `~` and `~/...` for your OS home directory before Chromium launch.
-  Per-profile `userDataDir` on `existing-session` profiles is also tilde-expanded.
+  Per-profile `userDataDir` on `existing-session` and `extension` profiles is also tilde-expanded.
 - Control service: loopback only (port derived from `gateway.port`, default `18791`).
 - `extraArgs` appends extra launch flags to local Chromium startup (for example
   `--disable-gpu`, window sizing, or debug flags).

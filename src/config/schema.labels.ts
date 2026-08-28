@@ -190,6 +190,7 @@ export const FIELD_LABELS: Record<string, string> = {
   "browser.profiles.*.cdpPort": "Browser Profile CDP Port",
   "browser.profiles.*.cdpUrl": "Browser Profile CDP URL",
   "browser.profiles.*.userDataDir": "Browser Profile User Data Dir",
+  "browser.profiles.*.profileDirectory": "Browser Profile Directory",
   "browser.profiles.*.mcpCommand": "Browser Profile Chrome MCP Command",
   "browser.profiles.*.mcpArgs": "Browser Profile Chrome MCP Args",
   "browser.profiles.*.driver": "Browser Profile Driver",

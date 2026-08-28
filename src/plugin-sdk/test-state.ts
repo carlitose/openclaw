@@ -4,3 +4,4 @@ export {
   withOpenClawTestState,
   type OpenClawTestState,
 } from "../test-utils/openclaw-test-state.js";
+export { getDeterministicFreePortBlock } from "../test-utils/ports.js";
