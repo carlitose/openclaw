@@ -3,7 +3,12 @@ type: concept
 title: Descendant popup containment
 created: 2026-08-28
 updated: 2026-08-28
-sources: [artifact-ticket-personal-chrome-browser-control-02, artifact-ticket-personal-chrome-browser-control-04, artifact-ticket-personal-chrome-browser-control-05]
+sources:
+  [
+    artifact-ticket-personal-chrome-browser-control-02,
+    artifact-ticket-personal-chrome-browser-control-04,
+    artifact-ticket-personal-chrome-browser-control-05,
+  ]
 tags: [browser-control, chrome-extension, popup, authority]
 related: [task-owned-browser-authority, navigation-hostname-policy]
 ---

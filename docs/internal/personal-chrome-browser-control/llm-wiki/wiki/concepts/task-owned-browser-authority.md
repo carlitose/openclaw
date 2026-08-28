@@ -3,7 +3,12 @@ type: concept
 title: Task-owned browser authority
 created: 2026-08-28
 updated: 2026-08-28
-sources: [artifact-wayfinder-personal-chrome-browser-control, artifact-ticket-personal-chrome-browser-control-04, artifact-ticket-personal-chrome-browser-control-05]
+sources:
+  [
+    artifact-wayfinder-personal-chrome-browser-control,
+    artifact-ticket-personal-chrome-browser-control-04,
+    artifact-ticket-personal-chrome-browser-control-05,
+  ]
 tags: [browser-control, authority, lifecycle, cleanup]
 related: [descendant-popup-containment, navigation-hostname-policy]
 ---

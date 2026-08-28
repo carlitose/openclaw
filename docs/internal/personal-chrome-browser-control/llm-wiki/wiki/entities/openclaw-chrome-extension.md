@@ -4,7 +4,11 @@ title: OpenClaw Chrome extension
 entity_type: tool
 created: 2026-08-28
 updated: 2026-08-28
-sources: [artifact-wayfinder-personal-chrome-browser-control, artifact-ticket-personal-chrome-browser-control-04]
+sources:
+  [
+    artifact-wayfinder-personal-chrome-browser-control,
+    artifact-ticket-personal-chrome-browser-control-04,
+  ]
 tags: [openclaw, chrome, mv3, browser-control]
 related: [task-owned-browser-authority, descendant-popup-containment]
 ---

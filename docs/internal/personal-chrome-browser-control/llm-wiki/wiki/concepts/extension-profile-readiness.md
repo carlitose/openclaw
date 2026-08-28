@@ -3,7 +3,11 @@ type: concept
 title: Extension profile readiness
 created: 2026-08-28
 updated: 2026-08-28
-sources: [artifact-wayfinder-personal-chrome-browser-control, artifact-ticket-personal-chrome-browser-control-03]
+sources:
+  [
+    artifact-wayfinder-personal-chrome-browser-control,
+    artifact-ticket-personal-chrome-browser-control-03,
+  ]
 tags: [browser-control, chrome, profile, readiness]
 related: [task-owned-browser-authority, evidence-lanes]
 ---

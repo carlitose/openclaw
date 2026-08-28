@@ -3,7 +3,14 @@ type: concept
 title: Evidence lanes
 created: 2026-08-28
 updated: 2026-08-28
-sources: [artifact-wayfinder-personal-chrome-browser-control, artifact-ticket-personal-chrome-browser-control-01, artifact-ticket-personal-chrome-browser-control-06, artifact-ticket-personal-chrome-browser-control-07, artifact-ticket-personal-chrome-browser-control-08]
+sources:
+  [
+    artifact-wayfinder-personal-chrome-browser-control,
+    artifact-ticket-personal-chrome-browser-control-01,
+    artifact-ticket-personal-chrome-browser-control-06,
+    artifact-ticket-personal-chrome-browser-control-07,
+    artifact-ticket-personal-chrome-browser-control-08,
+  ]
 tags: [browser-control, verification, isolation]
 related: [task-owned-browser-authority, implementation-frontier]
 ---
