@@ -284,7 +284,11 @@ describe("check-workflows", () => {
     expect(workflow).toContain(
       "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
     );
-    expect(workflow).toContain('observed_package_sha256="$(sha256sum');
+    // Git Bash prefixes sha256sum output with `\\` when the input path contains
+    // Windows separators, so hash the artifact by basename from its directory.
+    expect(workflow).toContain(
+      'observed_package_sha256="$(cd "$package_dir" && sha256sum openclaw-current.tgz',
+    );
     expect(workflow).toContain('"$packaged_head" != "$OPENCLAW_ISOLATION_CANDIDATE_SHA"');
     expect(workflow).toContain('"$observed_package_sha256" != "$package_sha256"');
     expect(workflow).toContain("npm install \\");

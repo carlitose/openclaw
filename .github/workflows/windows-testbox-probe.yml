@@ -370,7 +370,7 @@ jobs:
           mkdir -p "$runtime_dir"
           packaged_head="$(tr -d '\r\n' < "$package_dir/candidate.sha")"
           package_sha256="$(tr -d '\r\n' < "$package_dir/package.sha256")"
-          observed_package_sha256="$(sha256sum "$package_dir/openclaw-current.tgz" | cut -d ' ' -f 1)"
+          observed_package_sha256="$(cd "$package_dir" && sha256sum openclaw-current.tgz | cut -d ' ' -f 1)"
           if [[ "$packaged_head" != "$OPENCLAW_ISOLATION_CANDIDATE_SHA" ]]; then
             echo "Package candidate $packaged_head does not match frozen checkout $OPENCLAW_ISOLATION_CANDIDATE_SHA." >&2
             exit 1
