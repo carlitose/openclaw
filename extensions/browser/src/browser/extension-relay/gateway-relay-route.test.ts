@@ -251,6 +251,8 @@ describe("handleGatewayExtensionUpgrade", () => {
     startBrowserControlServiceFromConfigMock.mockResolvedValue(stateWithExtensionProfile());
     primeProfile();
     const bridge = { id: "v2-bridge" };
+    const installNavigationPolicy = vi.fn();
+    attachExtensionWebSocketMock.mockReturnValueOnce(installNavigationPolicy);
     ensureExtensionRelayForProfileMock.mockResolvedValue({ bridge });
     await mockSuccessfulUpgrade();
 
@@ -274,11 +276,12 @@ describe("handleGatewayExtensionUpgrade", () => {
     expect(startBrowserControlServiceFromConfigMock).toHaveBeenCalledOnce();
     expect(ensureExtensionRelayForProfileMock).toHaveBeenCalledOnce();
     expect(attachExtensionWebSocketMock).not.toHaveBeenCalled();
-    attach();
+    const afterAcknowledgement = attach();
     expect(attachExtensionWebSocketMock).toHaveBeenCalledWith(
       bridge,
       expect.objectContaining({ readyState: 1 }),
     );
+    expect(afterAcknowledgement).toBe(installNavigationPolicy);
   });
 
   it("rejects oversized direct-Gateway upgrade-head data before ws auth or lazy startup", async () => {

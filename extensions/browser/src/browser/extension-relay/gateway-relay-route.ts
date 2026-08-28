@@ -130,8 +130,8 @@ export async function handleGatewayExtensionUpgrade(
               }
               const { bridge, profileName } = await resolveGatewayBridge(resource);
               return () => {
-                attachExtensionWebSocket(bridge, ws);
                 log.info(`extension authenticated over gateway for profile "${profileName}"`);
+                return attachExtensionWebSocket(bridge, ws);
               };
             },
           });

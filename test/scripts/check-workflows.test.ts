@@ -294,7 +294,9 @@ describe("check-workflows", () => {
     expect(workflow).toContain("npm install \\");
     expect(workflow).toContain('--prefix "$runtime_dir"');
     expect(workflow).toContain("OPENCLAW_ISOLATION_RUNTIME_ROOT=$runtime_root");
-    expect(workflow).toContain("pnpm test:e2e:personal-chrome-isolation:windows");
+    expect(workflow).toContain(
+      "node --import tsx scripts/e2e/personal-chrome-isolation-windows.mts",
+    );
     expect(workflow).toContain("personal-chrome-windows-${{ github.run_id }}");
     expect(workflow).toContain("Refusing to remove package runtime outside RUNNER_TEMP");
   });

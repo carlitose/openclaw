@@ -399,7 +399,7 @@ jobs:
           set -euo pipefail
           export PATH="$NODE_BIN:$PATH"
           mkdir -p .artifacts/personal-chrome-windows
-          pnpm test:e2e:personal-chrome-isolation:windows 2>&1 | tee .artifacts/personal-chrome-windows/run.log
+          node --import tsx scripts/e2e/personal-chrome-isolation-windows.mts 2>&1 | tee .artifacts/personal-chrome-windows/run.log
 
       - name: Upload personal Chrome isolation proof
         if: ${{ always() && inputs.run_personal_chrome_isolation }}
