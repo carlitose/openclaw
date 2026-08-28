@@ -3,7 +3,18 @@ type: synthesis
 title: Implementation frontier
 created: 2026-08-28
 updated: 2026-08-28
-sources: [artifact-wayfinder-personal-chrome-browser-control, artifact-ticket-personal-chrome-browser-control-01, artifact-ticket-personal-chrome-browser-control-02, artifact-ticket-personal-chrome-browser-control-03, artifact-ticket-personal-chrome-browser-control-04, artifact-ticket-personal-chrome-browser-control-05, artifact-ticket-personal-chrome-browser-control-06, artifact-ticket-personal-chrome-browser-control-07, artifact-ticket-personal-chrome-browser-control-08]
+sources:
+  [
+    artifact-wayfinder-personal-chrome-browser-control,
+    artifact-ticket-personal-chrome-browser-control-01,
+    artifact-ticket-personal-chrome-browser-control-02,
+    artifact-ticket-personal-chrome-browser-control-03,
+    artifact-ticket-personal-chrome-browser-control-04,
+    artifact-ticket-personal-chrome-browser-control-05,
+    artifact-ticket-personal-chrome-browser-control-06,
+    artifact-ticket-personal-chrome-browser-control-07,
+    artifact-ticket-personal-chrome-browser-control-08,
+  ]
 tags: [status, browser-control, tickets]
 related: [evidence-lanes, task-owned-browser-authority]
 ---

@@ -3,7 +3,12 @@ type: concept
 title: Navigation hostname policy
 created: 2026-08-28
 updated: 2026-08-28
-sources: [path-docs-adrs-2026-08-27-browser-navigation-hostname-policy-md, artifact-ticket-personal-chrome-browser-control-02, artifact-ticket-personal-chrome-browser-control-05]
+sources:
+  [
+    path-docs-adrs-2026-08-27-browser-navigation-hostname-policy-md,
+    artifact-ticket-personal-chrome-browser-control-02,
+    artifact-ticket-personal-chrome-browser-control-05,
+  ]
 tags: [browser-control, navigation, policy, ssrf]
 related: [task-owned-browser-authority, descendant-popup-containment]
 ---

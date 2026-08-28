@@ -2,16 +2,16 @@
 
 ## Page Types
 
-| Type | Directory | Purpose |
-|------|-----------|---------|
-| entity | wiki/entities/ | Named things: people, tools, organisations, datasets |
-| concept | wiki/concepts/ | Ideas, techniques, phenomena, frameworks |
-| source | wiki/sources/ | Ingested material: papers, articles, repository docs, sessions |
-| query | wiki/queries/ | Open questions under active investigation |
-| comparison | wiki/comparisons/ | Side-by-side analysis of related entities |
-| synthesis | wiki/synthesis/ | Cross-cutting summaries and conclusions |
-| lifecycle | wiki/timeline/tickets/ | One record per ticket: disposition, dates, provenance |
-| period | wiki/timeline/ | One page per period in which something happened |
+| Type       | Directory              | Purpose                                                        |
+| ---------- | ---------------------- | -------------------------------------------------------------- |
+| entity     | wiki/entities/         | Named things: people, tools, organisations, datasets           |
+| concept    | wiki/concepts/         | Ideas, techniques, phenomena, frameworks                       |
+| source     | wiki/sources/          | Ingested material: papers, articles, repository docs, sessions |
+| query      | wiki/queries/          | Open questions under active investigation                      |
+| comparison | wiki/comparisons/      | Side-by-side analysis of related entities                      |
+| synthesis  | wiki/synthesis/        | Cross-cutting summaries and conclusions                        |
+| lifecycle  | wiki/timeline/tickets/ | One record per ticket: disposition, dates, provenance          |
+| period     | wiki/timeline/         | One page per period in which something happened                |
 
 ## Naming Conventions
 
