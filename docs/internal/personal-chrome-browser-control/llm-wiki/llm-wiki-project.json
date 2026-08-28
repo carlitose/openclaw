@@ -1,0 +1,14 @@
+{
+  "docs_globs": [
+    "docs/adrs/2026-08-27-browser-navigation-hostname-policy.md",
+    "docs/internal/personal-chrome-browser-control/WAYFINDER.md",
+    "docs/internal/personal-chrome-browser-control/tickets/**/*.md"
+  ],
+  "git_mode": "auto",
+  "project_root": "C:\\Users\\rdpuser\\projects\\openclaw-upstream",
+  "schema": 1,
+  "session_providers": [
+    "claude-code",
+    "codex"
+  ]
+}
