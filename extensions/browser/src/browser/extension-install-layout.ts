@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { constants as fsConstants, type Dirent } from "node:fs";
+import { constants as fsConstants, existsSync, type Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -37,6 +37,33 @@ export type ExtensionInstallDeps = {
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
 };
+
+function isBrowserPluginRoot(candidate: string): boolean {
+  return (
+    existsSync(path.join(candidate, "package.json")) &&
+    existsSync(path.join(candidate, "openclaw.plugin.json"))
+  );
+}
+
+/** Resolve the browser plugin's bundled extension across source and built layouts. */
+export function resolveBundledChromeExtensionDir(modulePath: string): string {
+  const moduleDir = path.dirname(modulePath);
+  if (path.basename(moduleDir) === "dist" || path.basename(moduleDir) === "dist-runtime") {
+    const unifiedPluginRoot = path.join(moduleDir, "extensions", "browser");
+    if (isBrowserPluginRoot(unifiedPluginRoot)) {
+      return path.join(unifiedPluginRoot, "chrome-extension");
+    }
+  }
+
+  let cursor = moduleDir;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (isBrowserPluginRoot(cursor)) {
+      return path.join(cursor, "chrome-extension");
+    }
+    cursor = path.dirname(cursor);
+  }
+  throw new Error("Could not resolve the browser plugin root from its installed module path");
+}
 
 /** Chromium crx_file::id_util::GenerateIdForPath for a canonical absolute path. */
 export function generateChromeExtensionIdForPath(
@@ -315,6 +342,7 @@ async function approvedRealpaths(paths: readonly string[]): Promise<string[]> {
 export async function discoverChromeExtensionIds(params: {
   approvedDirs: readonly string[];
   storeExtensionId?: string;
+  roots?: readonly ChromeProductRoot[];
   deps?: ExtensionInstallDeps;
 }): Promise<{
   discovered: DiscoveredChromeExtension[];
@@ -331,7 +359,7 @@ export async function discoverChromeExtensionIds(params: {
   const storeDiscovered: DiscoveredChromeStoreExtension[] = [];
   const issues: string[] = [];
   const identityMismatches: string[] = [];
-  for (const root of chromeProductRoots(deps)) {
+  for (const root of params.roots ?? chromeProductRoots(deps)) {
     if (!(await pathInfo(root.userDataDir))) {
       continue;
     }

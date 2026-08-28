@@ -165,6 +165,14 @@ export const OpenClawSchemaShape = {
               cdpPort: z.number().int().min(1).max(65535).optional(),
               cdpUrl: z.string().optional(),
               userDataDir: z.string().optional(),
+              profileDirectory: z
+                .string()
+                .trim()
+                .min(1)
+                .refine((value) => value !== "." && value !== ".." && !/[\\/]/u.test(value), {
+                  message: "Profile directory must be one Chrome profile directory name",
+                })
+                .optional(),
               mcpCommand: z.string().optional(),
               mcpArgs: z.array(z.string()).optional(),
               driver: z
@@ -189,9 +197,28 @@ export const OpenClawSchemaShape = {
                 message: "Profile must set cdpPort or cdpUrl",
               },
             )
-            .refine((value) => value.driver === "existing-session" || !value.userDataDir, {
-              message: 'Profile userDataDir is only supported with driver="existing-session"',
+            .refine(
+              (value) =>
+                value.driver === "existing-session" ||
+                value.driver === "extension" ||
+                !value.userDataDir,
+              {
+                message:
+                  'Profile userDataDir is only supported with driver="existing-session" or driver="extension"',
+              },
+            )
+            .refine((value) => value.driver === "extension" || !value.profileDirectory, {
+              message: 'Profile profileDirectory is only supported with driver="extension"',
             })
+            .refine(
+              (value) =>
+                value.driver !== "extension" ||
+                Boolean(value.userDataDir?.trim()) === Boolean(value.profileDirectory?.trim()),
+              {
+                message:
+                  "Extension profile launch requires both userDataDir and profileDirectory, or neither",
+              },
+            )
             .refine((value) => value.driver !== "extension" || !value.cdpUrl, {
               message:
                 'Profile cdpUrl is not supported with driver="extension" (the relay owns the endpoint)',

@@ -4,7 +4,6 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { isPathInside } from "openclaw/plugin-sdk/file-access-runtime";
 import {
   asNullableRecord,
@@ -18,6 +17,7 @@ import {
 } from "./browser/chrome.executables.js";
 import { DEFAULT_OPENCLAW_BROWSER_PROFILE_NAME, resolveBrowserConfig } from "./browser/config.js";
 import {
+  BUNDLED_CHROME_EXTENSION_DIR,
   browserExtensionStatus,
   FOUNDATION_CHROME_WEB_STORE_URL,
   repairOwnedChromeExtensionNativeHosts,
@@ -35,11 +35,7 @@ const REMOTE_DEBUGGING_PAGES = [
   "brave://inspect/#remote-debugging",
   "edge://inspect/#remote-debugging",
 ].join(", ");
-const BROWSER_MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
-const BROWSER_PLUGIN_ROOT = fs.existsSync(path.join(BROWSER_MODULE_DIR, "package.json"))
-  ? BROWSER_MODULE_DIR
-  : path.dirname(BROWSER_MODULE_DIR);
-const BUNDLED_CHROME_EXTENSION_DIR = path.join(BROWSER_PLUGIN_ROOT, "chrome-extension");
+const BROWSER_PLUGIN_ROOT = path.dirname(BUNDLED_CHROME_EXTENSION_DIR);
 
 type ExistingSessionProfile = {
   name: string;
@@ -114,12 +110,33 @@ function collectManagedProfiles(cfg: OpenClawConfig): ManagedProfile[] {
   for (const [profileName, rawProfile] of Object.entries(configuredProfiles)) {
     const profile = asNullableRecord(rawProfile);
     const driver = normalizeOptionalString(profile?.driver) ?? "openclaw";
-    if (driver !== "existing-session") {
+    if (driver !== "existing-session" && driver !== "extension") {
       profiles.set(profileName, { name: profileName });
     }
   }
 
   return [...profiles.values()].toSorted((a, b) => a.name.localeCompare(b.name));
+}
+
+function collectExtensionLaunchProfiles(cfg: OpenClawConfig): ManagedProfile[] {
+  const profiles = asNullableRecord(asNullableRecord(cfg.browser)?.profiles);
+  if (!profiles) {
+    return [];
+  }
+  const result: ManagedProfile[] = [];
+  for (const [name, rawProfile] of Object.entries(profiles)) {
+    const profile = asNullableRecord(rawProfile);
+    const userDataDir = normalizeOptionalString(profile?.userDataDir);
+    const profileDirectory = normalizeOptionalString(profile?.profileDirectory);
+    if (
+      normalizeOptionalString(profile?.driver) === "extension" &&
+      userDataDir &&
+      profileDirectory
+    ) {
+      result.push({ name });
+    }
+  }
+  return result.toSorted((a, b) => a.name.localeCompare(b.name));
 }
 
 function resolveManagedBrowserProfileDir(configDir: string, profileName: string): string {
@@ -235,6 +252,7 @@ export async function noteChromeMcpBrowserReadiness(
     deps?.resolveChromeExecutable ?? resolveGoogleChromeExecutableForPlatform;
   const readVersion = deps?.readVersion ?? readBrowserVersion;
   const managedProfiles = collectManagedProfiles(cfg);
+  const extensionLaunchProfiles = collectExtensionLaunchProfiles(cfg);
   const managedProfileLabel = managedProfiles.map((profile) => profile.name).join(", ");
   const resolved = resolveBrowserConfig(cfg.browser, cfg);
   if (resolved.enabled && resolved.extensionRelay.allowLegacyAuth) {
@@ -245,6 +263,16 @@ export async function noteChromeMcpBrowserReadiness(
         "- V2 clients never downgrade to legacy authentication.",
       ].join("\n"),
       "Browser relay authentication",
+    );
+  }
+  if (extensionLaunchProfiles.length > 0) {
+    noteFn(
+      [
+        `- Extension profile launch is configured for: ${extensionLaunchProfiles.map((profile) => profile.name).join(", ")}.`,
+        "- OpenClaw opens only each configured userDataDir and profileDirectory in the current interactive desktop session; it does not copy, stop, restart, or repair that personal Chrome profile.",
+        "- The OpenClaw extension must already be installed in that exact Chrome profile. On Windows, extension installation and pairing remain manual.",
+      ].join("\n"),
+      "Browser extension profile launch",
     );
   }
   const extensionStateDir = deps?.configDir ?? CONFIG_DIR;

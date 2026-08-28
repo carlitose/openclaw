@@ -4,6 +4,8 @@
  * Provides HTTP-mappable error classes and stable blocked-policy messages used
  * by route handlers, clients, and Gateway proxy code.
  */
+import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+
 /** Stable message for blocked CDP endpoint configuration. */
 const BROWSER_ENDPOINT_BLOCKED_MESSAGE = "browser endpoint blocked by policy";
 /** Stable message for blocked page navigation targets. */
@@ -11,26 +13,48 @@ const BROWSER_NAVIGATION_BLOCKED_MESSAGE = "browser navigation blocked by policy
 
 /** Stable machine-readable browser error reasons. */
 export const BROWSER_ERROR_REASONS = {
+  chromeLaunchFailed: "chrome-launch-failed",
+  extensionNotInstalled: "extension-not-installed",
   noDisplayForHeadedProfile: "no_display_for_headed_profile",
+  profileAmbiguous: "profile-ambiguous",
+  profileNotConfigured: "profile-not-configured",
+  relayTimeout: "relay-timeout",
 } as const;
 
 const NO_DISPLAY_HEADLESS_SOURCES = ["request", "env", "profile", "config", "default"] as const;
 
-export type BrowserNoDisplayErrorDetails = {
+type BrowserNoDisplayErrorDetails = {
   profile: string;
   requestedHeadless: false;
   headlessSource: (typeof NO_DISPLAY_HEADLESS_SOURCES)[number];
   displayPresent: false;
 };
 
-export type BrowserNoDisplayErrorMetadata = {
+type BrowserNoDisplayErrorMetadata = {
   reason: typeof BROWSER_ERROR_REASONS.noDisplayForHeadedProfile;
   details: BrowserNoDisplayErrorDetails;
 };
 
-type WithNoDisplayMetadata<T> = T | (T & BrowserNoDisplayErrorMetadata);
-export type BrowserErrorResponse = WithNoDisplayMetadata<{ status: number; message: string }>;
-type BrowserErrorPayload = WithNoDisplayMetadata<{ error: string }>;
+const EXTENSION_PROFILE_ERROR_REASONS = [
+  BROWSER_ERROR_REASONS.chromeLaunchFailed,
+  BROWSER_ERROR_REASONS.extensionNotInstalled,
+  BROWSER_ERROR_REASONS.profileAmbiguous,
+  BROWSER_ERROR_REASONS.profileNotConfigured,
+  BROWSER_ERROR_REASONS.relayTimeout,
+] as const;
+
+export type BrowserExtensionProfileErrorMetadata = {
+  reason: (typeof EXTENSION_PROFILE_ERROR_REASONS)[number];
+  details: { profile: string };
+};
+
+export type BrowserProfileUnavailableErrorMetadata =
+  | BrowserNoDisplayErrorMetadata
+  | BrowserExtensionProfileErrorMetadata;
+
+type WithBrowserErrorMetadata<T> = T | (T & BrowserProfileUnavailableErrorMetadata);
+export type BrowserErrorResponse = WithBrowserErrorMetadata<{ status: number; message: string }>;
+type BrowserErrorPayload = WithBrowserErrorMetadata<{ error: string }>;
 
 /** Base browser error carrying an HTTP status code. */
 export class BrowserError extends Error {
@@ -106,11 +130,11 @@ export class BrowserResetUnsupportedError extends BrowserError {
 
 /** Raised when a profile is configured but not currently reachable. */
 export class BrowserProfileUnavailableError extends BrowserError {
-  readonly metadata?: BrowserNoDisplayErrorMetadata;
+  readonly metadata?: BrowserProfileUnavailableErrorMetadata;
 
   constructor(
     message: string,
-    options?: ErrorOptions & { metadata?: BrowserNoDisplayErrorMetadata },
+    options?: ErrorOptions & { metadata?: BrowserProfileUnavailableErrorMetadata },
   ) {
     super(message, 409, options);
     this.metadata = options?.metadata;
@@ -154,10 +178,10 @@ export function toBrowserErrorResponse(err: unknown): BrowserErrorResponse | nul
 }
 
 function parseNoDisplayDetails(value: unknown): BrowserNoDisplayErrorDetails | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return null;
   }
-  const details = value as Record<string, unknown>;
+  const details = value;
   if (
     typeof details.profile !== "string" ||
     details.profile.length === 0 ||
@@ -177,12 +201,28 @@ function parseNoDisplayDetails(value: unknown): BrowserNoDisplayErrorDetails | n
   };
 }
 
-/** Parse only the closed browser error metadata contract from a route payload. */
-export function parseBrowserErrorPayload(value: unknown): BrowserErrorPayload | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+function parseExtensionProfileDetails(value: unknown): { profile: string } | null {
+  if (!isRecord(value)) {
     return null;
   }
-  const body = value as Record<string, unknown>;
+  const details = value;
+  return typeof details.profile === "string" && details.profile.length > 0
+    ? { profile: details.profile }
+    : null;
+}
+
+function isExtensionProfileErrorReason(
+  value: unknown,
+): value is BrowserExtensionProfileErrorMetadata["reason"] {
+  return EXTENSION_PROFILE_ERROR_REASONS.some((reason) => reason === value);
+}
+
+/** Parse only the closed browser error metadata contract from a route payload. */
+export function parseBrowserErrorPayload(value: unknown): BrowserErrorPayload | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const body = value;
   if (typeof body.error !== "string" || body.error.length === 0) {
     return null;
   }
@@ -190,6 +230,16 @@ export function parseBrowserErrorPayload(value: unknown): BrowserErrorPayload | 
     const details = parseNoDisplayDetails(body.details);
     if (details) {
       return { error: body.error, reason: body.reason, details };
+    }
+  }
+  if (isExtensionProfileErrorReason(body.reason)) {
+    const details = parseExtensionProfileDetails(body.details);
+    if (details) {
+      return {
+        error: body.error,
+        reason: body.reason,
+        details,
+      };
     }
   }
   return { error: body.error };

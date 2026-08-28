@@ -381,12 +381,12 @@ main model can read the screenshot directly.
 - Headless managed Chrome still uses the conservative `--disable-gpu` default.
   The diagnostics do not enable acceleration, add a global acceleration setting,
   or grant sandbox browser device access.
-- `executablePath` can be set globally or per local managed profile. Per-profile values override `browser.executablePath`, so different managed profiles can launch different Chromium-based browsers. Both forms accept `~` for your OS home directory.
+- `executablePath` can be set globally or per local managed profile, and per a configured extension-profile launch. Per-profile values override `browser.executablePath`. Both forms accept `~` for your OS home directory.
 - Default profile is `openclaw` (managed standalone). Use `defaultProfile: "user"` to opt into the signed-in user browser.
 - Auto-detect order: system default browser if Chromium-based; otherwise Chrome, Brave, Edge, Chromium, Chrome Canary.
 - `driver: "existing-session"` uses Chrome DevTools MCP instead of raw CDP. It can attach through Chrome MCP auto-connect, or through `cdpUrl` when you already have a DevTools endpoint for the running browser.
 - `driver: "extension"` drives your signed-in Chrome through the [OpenClaw Chrome extension](/tools/chrome-extension). The relay owns its loopback endpoint, so these profiles do not accept `cdpUrl`. This is the only signed-in-browser mode that works with nobody at the computer.
-- Set `browser.profiles.<name>.userDataDir` when an existing-session profile should attach to a non-default Chromium user profile (Brave, Edge, etc.). This path also accepts `~` for your OS home directory.
+- Set `browser.profiles.<name>.userDataDir` when an existing-session profile should attach to a non-default Chromium user profile (Brave, Edge, etc.). For an extension profile, set it together with `profileDirectory` to let OpenClaw open that exact existing Chrome profile when disconnected. The path accepts `~` for your OS home directory.
 
 </Accordion>
 
@@ -436,9 +436,10 @@ Or set it in config, per platform:
   </Tab>
 </Tabs>
 
-Per-profile `executablePath` only affects local managed profiles that OpenClaw
-launches. `existing-session` profiles attach to an already-running browser
-instead, and remote CDP profiles use the browser behind `cdpUrl`.
+Per-profile `executablePath` affects local managed profiles and extension
+profiles with both `userDataDir` and `profileDirectory`. `existing-session`
+profiles attach through Chrome MCP instead, and remote CDP profiles use the
+browser behind `cdpUrl`.
 
 ## Local vs remote control
 
