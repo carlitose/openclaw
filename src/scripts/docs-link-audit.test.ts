@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { cleanupTempDirs, makeTempDir } from "../../test/helpers/temp-dir.js";
 
 const {
+  auditDocsLinks,
   normalizeRoute,
   prepareAnchorAuditDocsDir,
   prepareExternalLinkAuditTree,
@@ -19,6 +20,23 @@ describe("docs-link-audit", () => {
   function tempEntries(prefix: string): Set<string> {
     return new Set(fs.readdirSync(os.tmpdir()).filter((entry) => entry.startsWith(prefix)));
   }
+
+  it("resolves frozen ticket links from their pre-disposition directory", () => {
+    const tempDirs: string[] = [];
+    const fixtureRoot = makeTempDir(tempDirs, "docs-link-audit-ticket-disposition-");
+    const docsRoot = path.join(fixtureRoot, "docs");
+    const ticketDir = path.join(docsRoot, "internal", "browser", "tickets", "done");
+    fs.mkdirSync(ticketDir, { recursive: true });
+    fs.writeFileSync(path.join(docsRoot, "docs.json"), '{"navigation":[]}\n', "utf8");
+    fs.writeFileSync(path.join(docsRoot, "internal", "browser", "WAYFINDER.md"), "# Map\n");
+    fs.writeFileSync(path.join(ticketDir, "01.md"), "[Parent](../WAYFINDER.md)\n");
+
+    try {
+      expect(auditDocsLinks({ docsDir: docsRoot })).toEqual({ checked: 1, broken: [] });
+    } finally {
+      cleanupTempDirs(tempDirs);
+    }
+  });
 
   it("normalizes route fragments away", () => {
     expect(normalizeRoute("/plugins/building-plugins#registering-agent-tools")).toBe(

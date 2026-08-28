@@ -22,6 +22,7 @@ const MARKDOWN_PARSER = new MarkdownIt({ html: false });
 const HTML_MARKDOWN_PARSER = new MarkdownIt({ html: true });
 type MarkdownToken = ReturnType<typeof MARKDOWN_PARSER.parse>[number];
 const VERBATIM_MDX_ELEMENTS = new Set(["code", "pre", "script", "style", "textarea"]);
+const TICKET_DISPOSITION_DIRS = new Set(["done", "canceled", "hold"]);
 const MINTLIFY_CLI_VERSION = "4.2.808";
 const MINTLIFY_BROKEN_LINKS_ARGS = [
   "exec",
@@ -706,7 +707,22 @@ function resolveMintlifyAnchorAuditInvocation(params: MintlifyInvocationParams):
 /**
  * Audits local docs links against route, file, and redirect indexes.
  */
-function auditDocsLinks(options: { docsDir?: string; allowExternalClawHubRoutes?: boolean } = {}) {
+function relativeDocTargets(source: string, baseDir: string, target: string): string[] {
+  const sourceParts = normalizeSlashes(source).split("/");
+  const roots = [baseDir];
+  // Ticket bytes stay digest-frozen when lifecycle moves them one level deeper.
+  // Resolve their original relative links from the pre-disposition directory too.
+  if (sourceParts.includes("tickets") && TICKET_DISPOSITION_DIRS.has(path.basename(baseDir))) {
+    roots.push(path.dirname(baseDir));
+  }
+  return [
+    ...new Set(roots.map((root) => normalizeSlashes(path.normalize(path.join(root, target))))),
+  ];
+}
+
+export function auditDocsLinks(
+  options: { docsDir?: string; allowExternalClawHubRoutes?: boolean } = {},
+) {
   const docsDir = options.docsDir ?? DOCS_DIR;
   const index = buildAuditIndex(docsDir, {
     allowExternalClawHubRoutes: options.allowExternalClawHubRoutes === true,
@@ -779,10 +795,10 @@ function auditDocsLinks(options: { docsDir?: string; allowExternalClawHubRoutes?
           continue;
         }
 
-        const normalizedRel = normalizeSlashes(path.normalize(path.join(baseDir, clean)));
+        const normalizedTargets = relativeDocTargets(rel, baseDir, clean);
 
-        if (/\.[a-zA-Z0-9]+$/.test(normalizedRel)) {
-          if (!index.relAllFiles.has(normalizedRel)) {
+        if (/\.[a-zA-Z0-9]+$/.test(clean)) {
+          if (!normalizedTargets.some((candidate) => index.relAllFiles.has(candidate))) {
             broken.push({
               file: rel,
               line: lineNum + 1,
@@ -793,13 +809,13 @@ function auditDocsLinks(options: { docsDir?: string; allowExternalClawHubRoutes?
           continue;
         }
 
-        const candidates = [
+        const candidates = normalizedTargets.flatMap((normalizedRel) => [
           normalizedRel,
           `${normalizedRel}.md`,
           `${normalizedRel}.mdx`,
           `${normalizedRel}/index.md`,
           `${normalizedRel}/index.mdx`,
-        ];
+        ]);
 
         if (!candidates.some((candidate) => index.relAllFiles.has(candidate))) {
           broken.push({
