@@ -1,3 +1,4 @@
+import { createDescendantTabContainment } from "./descendant-tab-containment.js";
 import { ACCESS_MODE_ALL, ACCESS_MODE_SELECTED } from "./relay-core.js";
 import { effectiveTabUrl } from "./tab-eligibility.js";
 
@@ -6,6 +7,7 @@ export function registerTabAccessEvents({
   chromeApi = chrome,
   accessReady,
   policy,
+  isTabInOpenClawGroup,
   attachedTabs,
   attachedAccessEpochs,
   attachmentTokens,
@@ -15,11 +17,22 @@ export function registerTabAccessEvents({
   detachDebugger,
   pauseTab,
   removeTabFromOpenClawGroup,
+  placeTabInGroup,
   runAccessMutation,
   getUtilityWorldName,
   forgetUtilityWorld,
 }) {
   let groupEventRevision = 0;
+  const descendantContainment = createDescendantTabContainment({
+    chromeApi,
+    accessReady,
+    policy,
+    isTabInOpenClawGroup,
+    placeTabInGroup,
+    removeTabFromGroup: removeTabFromOpenClawGroup,
+    scheduleTabsSync,
+    runAccessMutation,
+  });
   const mainContextProbes = new Map();
   const attachmentIsCurrent = (tabId, accessEpoch, attachmentToken) =>
     policy.epochIsCurrent(tabId, accessEpoch) &&
@@ -128,7 +141,10 @@ export function registerTabAccessEvents({
     }).catch(() => undefined);
   });
 
+  chromeApi.tabs.onCreated.addListener((tab) => descendantContainment.onCreated(tab));
+
   chromeApi.tabs.onRemoved.addListener((tabId) => {
+    descendantContainment.onRemoved(tabId);
     void (async () => {
       await accessReady;
       policy.invalidateTab(tabId);
@@ -175,6 +191,7 @@ export function registerTabAccessEvents({
       // Pre-proof events intentionally drop; replay could cross a restricted destination.
       policy.invalidateTab(tabId);
     }
+    descendantContainment.onUpdated(tabId, changeInfo);
     const eventEpoch = policy.capture(tabId);
     void (async () => {
       await accessReady;
@@ -288,6 +305,7 @@ export function registerTabAccessEvents({
   });
 
   const onGroupChanged = () => {
+    descendantContainment.reconcile();
     const eventRevision = ++groupEventRevision;
     scheduleTabsSync();
     if (policy.mode !== ACCESS_MODE_SELECTED) {
