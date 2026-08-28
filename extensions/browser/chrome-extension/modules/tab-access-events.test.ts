@@ -30,6 +30,7 @@ function createHarness(
   let tabsUpdatedListener:
     | ((tabId: number, changeInfo: { groupId?: number; url?: string }) => void)
     | undefined;
+  let tabsCreatedListener: ((tab: { id: number; openerTabId?: number }) => void) | undefined;
   let tabsReplacedListener: ((addedTabId: number, removedTabId: number) => void) | undefined;
   let groupUpdatedListener: (() => void) | undefined;
   let revision = 0;
@@ -107,6 +108,16 @@ function createHarness(
       },
     },
     tabs: {
+      get: vi.fn(async (tabId: number) => ({
+        id: tabId,
+        url: "https://two.example",
+        groupId: tabId === 7 ? 23 : -1,
+      })),
+      onCreated: {
+        addListener: (listener: typeof tabsCreatedListener) => {
+          tabsCreatedListener = listener;
+        },
+      },
       onRemoved: { addListener: vi.fn() },
       onReplaced: {
         addListener: (listener: typeof tabsReplacedListener) => {
@@ -133,6 +144,7 @@ function createHarness(
     chromeApi,
     accessReady,
     policy,
+    isTabInOpenClawGroup: async (tab) => tab.groupId === 23,
     attachedTabs,
     attachedAccessEpochs,
     attachmentTokens,
@@ -142,6 +154,7 @@ function createHarness(
     detachDebugger,
     pauseTab,
     removeTabFromOpenClawGroup,
+    placeTabInGroup: vi.fn(async () => undefined),
     runAccessMutation: vi.fn(async (task) => await task()),
     getUtilityWorldName: () => "__playwright_utility_world_page-guid",
     forgetUtilityWorld: vi.fn(),
@@ -149,6 +162,7 @@ function createHarness(
   if (
     !debuggerEventListener ||
     !debuggerDetachListener ||
+    !tabsCreatedListener ||
     !tabsUpdatedListener ||
     !tabsReplacedListener ||
     !groupUpdatedListener

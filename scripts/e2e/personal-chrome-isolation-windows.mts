@@ -30,6 +30,7 @@ const extensionSource = path.join(repoRoot, "dist", "extensions", "browser", "ch
 // virus-scanner inspection. Keep that process cap separate from browser readiness deadlines.
 const WINDOWS_CLI_PROCESS_TIMEOUT_MS = 120_000;
 const WINDOWS_GATEWAY_PROCESS_START_TIMEOUT_MS = 120_000;
+const WINDOWS_EXTENSION_RELAY_READY_ATTEMPTS = 3;
 
 async function waitForPort(port: number): Promise<void> {
   const deadline = Date.now() + WINDOWS_GATEWAY_PROCESS_START_TIMEOUT_MS;
@@ -96,19 +97,61 @@ async function waitForExtensionRelay(params: {
   port: number;
   token: string;
 }): Promise<string> {
-  const deadline = Date.now() + 45_000;
   let lastError: unknown;
-  while (Date.now() < deadline) {
+  // Count complete attempts: a command that starts just before a wall-clock
+  // deadline must not consume the retry for a transient relay identity race.
+  for (let attempt = 0; attempt < WINDOWS_EXTENSION_RELAY_READY_ATTEMPTS; attempt += 1) {
     try {
       return await runBrowserCli({ ...params, args: ["tabs"] });
     } catch (error) {
       lastError = error;
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, 500);
-      });
+      if (attempt + 1 < WINDOWS_EXTENSION_RELAY_READY_ATTEMPTS) {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 500);
+        });
+      }
     }
   }
   throw new Error("candidate extension relay did not become ready", { cause: lastError });
+}
+
+type BrowserTab = { targetId?: unknown; url?: unknown };
+
+function parseOpenedTargetId(raw: string): string {
+  const targetId = (JSON.parse(raw) as BrowserTab).targetId;
+  if (typeof targetId !== "string" || targetId.length === 0) {
+    throw new Error("browser open did not return a target id");
+  }
+  return targetId;
+}
+
+async function waitForAccessibleFixtureTabs(params: {
+  env: NodeJS.ProcessEnv;
+  port: number;
+  token: string;
+  expectedUrls: readonly string[];
+}): Promise<string> {
+  const deadline = Date.now() + 10_000;
+  let lastTabs = "";
+  while (Date.now() < deadline) {
+    lastTabs = await runBrowserCli({
+      env: params.env,
+      port: params.port,
+      token: params.token,
+      args: ["tabs"],
+    });
+    const payload = JSON.parse(lastTabs) as { tabs?: BrowserTab[] };
+    const urls = new Set(
+      (payload.tabs ?? []).flatMap((tab) => (typeof tab.url === "string" ? [tab.url] : [])),
+    );
+    if (params.expectedUrls.every((url) => urls.has(url))) {
+      return lastTabs;
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 100);
+    });
+  }
+  throw new Error(`candidate extension did not publish the expected fixture tabs: ${lastTabs}`);
 }
 
 async function openConfiguredExtensionProfile(params: {
@@ -147,12 +190,16 @@ async function waitForFixturePaths(
   throw new Error(`loopback fixtures were not observed: ${missing.join(", ")}`);
 }
 
-async function runWithCleanup<T>(run: () => Promise<T>, cleanup: () => Promise<void>): Promise<T> {
+async function runWithCleanup<T>(
+  run: () => Promise<T>,
+  cleanup: () => Promise<void>,
+  mapRunError?: (error: unknown) => Promise<unknown>,
+): Promise<T> {
   let runOutcome: { ok: true; value: T } | { ok: false; error: unknown };
   try {
     runOutcome = { ok: true, value: await run() };
   } catch (error) {
-    runOutcome = { ok: false, error };
+    runOutcome = { ok: false, error: mapRunError ? await mapRunError(error) : error };
   }
 
   let cleanupOutcome: { ok: true } | { ok: false; error: unknown };
@@ -177,6 +224,21 @@ async function runWithCleanup<T>(run: () => Promise<T>, cleanup: () => Promise<v
     throw cleanupOutcome.error;
   }
   return runOutcome.value;
+}
+
+async function gatewayRelayDiagnosticError(gatewayLogPath: string, cause: unknown): Promise<Error> {
+  const log = await fs.readFile(gatewayLogPath, "utf8").catch(() => "");
+  const diagnostics = log
+    .split(/\r?\n/u)
+    .filter((line) => /extension-relay|auto-attach|attach failed/iu.test(line))
+    .slice(-12)
+    .join("\n");
+  return new Error(
+    diagnostics
+      ? `native extension relay failed:\n${diagnostics}`
+      : "native extension relay failed without Gateway diagnostics",
+    { cause },
+  );
 }
 
 async function main(): Promise<void> {
@@ -322,6 +384,7 @@ async function main(): Promise<void> {
             args: ["open", fixtures.urls.root],
           });
           await fs.writeFile(path.join(task.artifactsDir, "root-open.json"), openResult, "utf8");
+          const rootTargetId = parseOpenedTargetId(openResult);
           try {
             await fs.access(chromeLauncher.argumentsPath);
             throw new Error("healthy extension relay unexpectedly launched another Chrome process");
@@ -330,6 +393,8 @@ async function main(): Promise<void> {
               throw error;
             }
           }
+          // Each separate user activation may open only one child. Keep one
+          // inventory read after both actions to limit source-checkout CLI starts.
           const popupResult = await runBrowserCli({
             env: task.env,
             port: task.gatewayPort,
@@ -338,14 +403,45 @@ async function main(): Promise<void> {
               "evaluate",
               "--fn",
               "() => { document.querySelector('#popup')?.click(); return true; }",
+              "--target-id",
+              rootTargetId,
             ],
           });
           await fs.writeFile(path.join(task.artifactsDir, "popup-open.json"), popupResult, "utf8");
+          const childResult = await runBrowserCli({
+            env: task.env,
+            port: task.gatewayPort,
+            token: task.gatewayToken,
+            args: [
+              "evaluate",
+              "--fn",
+              "() => { document.querySelector('#child')?.click(); return true; }",
+              "--target-id",
+              rootTargetId,
+            ],
+          });
+          await fs.writeFile(path.join(task.artifactsDir, "child-open.json"), childResult, "utf8");
+          const descendantTabs = await waitForAccessibleFixtureTabs({
+            env: task.env,
+            port: task.gatewayPort,
+            token: task.gatewayToken,
+            expectedUrls: [
+              fixtures.urls.unrelated,
+              fixtures.urls.root,
+              fixtures.urls.child,
+              fixtures.urls.popup,
+            ],
+          });
+          await fs.writeFile(
+            path.join(task.artifactsDir, "descendant-tabs.json"),
+            descendantTabs,
+            "utf8",
+          );
           const redirectResult = await runBrowserCli({
             env: task.env,
             port: task.gatewayPort,
             token: task.gatewayToken,
-            args: ["navigate", fixtures.urls.redirect],
+            args: ["navigate", fixtures.urls.redirect, "--target-id", rootTargetId],
           });
           await fs.writeFile(
             path.join(task.artifactsDir, "redirect-navigation.json"),
@@ -438,6 +534,7 @@ async function main(): Promise<void> {
           // manifest is removed by the enclosing registration owner.
           await task.cleanup();
         },
+        async (error) => await gatewayRelayDiagnosticError(gatewayLogPath, error),
       );
       process.stdout.write(`${JSON.stringify(successPayload)}\n`);
     });

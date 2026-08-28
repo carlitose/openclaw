@@ -67,6 +67,9 @@ export async function loadBackground({
     | ((source: { tabId?: number; sessionId?: string }, method: string, params?: unknown) => void)
     | undefined;
   let tabsRemovedListener: ((tabId: number) => void) | undefined;
+  let tabsCreatedListener:
+    | ((tab: Record<string, unknown> & { id: number; openerTabId?: number }) => void)
+    | undefined;
   let tabsReplacedListener: ((addedTabId: number, removedTabId: number) => void) | undefined;
   let tabGroupUpdatedListener: (() => void) | undefined;
   let tabGroupRemovedListener: (() => void) | undefined;
@@ -369,6 +372,15 @@ export async function loadBackground({
           tabsRemovedListener = listener;
         }),
       },
+      onCreated: {
+        addListener: vi.fn(
+          (
+            listener: (tab: Record<string, unknown> & { id: number; openerTabId?: number }) => void,
+          ) => {
+            tabsCreatedListener = listener;
+          },
+        ),
+      },
       onReplaced: {
         addListener: vi.fn((listener: (addedTabId: number, removedTabId: number) => void) => {
           tabsReplacedListener = listener;
@@ -420,6 +432,7 @@ export async function loadBackground({
     !installedListener ||
     !messageListener ||
     !startupListener ||
+    !tabsCreatedListener ||
     !tabsUpdatedListener ||
     !tabsReplacedListener
   ) {
@@ -559,6 +572,7 @@ export async function loadBackground({
     tabGroupUpdatedListener,
     tabGroupRemovedListener,
     tabsCreate: chromeMock.tabs.create,
+    tabsCreatedListener,
     tabsGet: chromeMock.tabs.get,
     tabsGroup: chromeMock.tabs.group,
     tabsQuery: chromeMock.tabs.query,

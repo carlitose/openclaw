@@ -406,7 +406,7 @@ async function startFixtureServer(artifactsDir: string): Promise<{
       if (requestUrl.pathname === "/root") {
         response.setHeader("content-type", "text/html; charset=utf-8");
         response.end(
-          `<a id="child" href="${urls.child}">child</a><button id="popup" onclick="window.open('${urls.popup}')">popup</button>`,
+          `<a id="child" href="${urls.child}" target="_blank" rel="opener">child</a><button id="popup" onclick="window.open('${urls.popup}', 'openclaw-popup', 'popup,width=480,height=320')">popup</button>`,
         );
         return;
       }
