@@ -94,6 +94,7 @@ function createHarness(
     attachedTabs.delete(tabId);
     attachedAccessEpochs.delete(tabId);
   });
+  const scheduleTabsSync = vi.fn();
   const pauseTab = vi.fn(async () => undefined);
   const removeTabFromOpenClawGroup = vi.fn(async () => undefined);
   const chromeApi = {
@@ -154,7 +155,7 @@ function createHarness(
     attachmentTokens,
     attachingTabs,
     send,
-    scheduleTabsSync: vi.fn(),
+    scheduleTabsSync,
     detachDebugger,
     pauseTab,
     removeTabFromOpenClawGroup,
@@ -192,6 +193,7 @@ function createHarness(
     policy,
     pauseTab,
     removeTabFromOpenClawGroup,
+    scheduleTabsSync,
     send,
     sendCommand,
     setAccessible: (next: boolean) => {
@@ -651,6 +653,19 @@ describe("tab access event epochs", () => {
       expect(harness.detachDebugger).toHaveBeenCalledWith(7);
       expect(harness.detachDebugger).toHaveBeenCalledWith(8);
     });
+  });
+
+  it("does not publish a replacement tab before stale debugger cleanup finishes", async () => {
+    const harness = createHarness("all");
+    const replacement = deferred<boolean>();
+    harness.policy.replaceTab.mockImplementationOnce(async () => await replacement.promise);
+
+    harness.tabsReplacedListener(8, 7);
+
+    expect(harness.scheduleTabsSync).not.toHaveBeenCalled();
+    replacement.resolve(true);
+    await vi.waitFor(() => expect(harness.detachDebugger).toHaveBeenCalledTimes(2));
+    expect(harness.scheduleTabsSync).toHaveBeenCalledOnce();
   });
 
   it("lets a newer eligible tab event own stale group-wide reconciliation", async () => {

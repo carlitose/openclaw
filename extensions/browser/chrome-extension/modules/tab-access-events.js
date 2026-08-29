@@ -193,7 +193,6 @@ export function registerTabAccessEvents({
     attachmentTokens.delete(removedTabId);
     mainContextProbes.delete(removedTabId);
     forgetUtilityWorld(removedTabId);
-    scheduleTabsSync();
     void (async () => {
       try {
         await accessReady;
@@ -202,6 +201,8 @@ export function registerTabAccessEvents({
         await Promise.allSettled([detachDebugger(removedTabId), detachDebugger(addedTabId)]);
       } finally {
         policy.endRevocation(revocation);
+        // Publish the replacement only after both old and newly racing
+        // attachments are gone, so the relay cannot reattach into this cleanup.
         scheduleTabsSync();
       }
     })().catch(() => undefined);
