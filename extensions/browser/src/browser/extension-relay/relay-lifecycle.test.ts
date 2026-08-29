@@ -30,6 +30,9 @@ const ROTATED_TOKEN = relayTestKey(2);
 
 const PROFILE_NAME = "chrome";
 const RELAY_PORT = 18_123;
+const NAVIGATION_POLICY_KEY = JSON.stringify({
+  navigationPolicy: { version: 1, allow: [], deny: [] },
+});
 
 function createState(token: string, existing?: ExtensionRelayHandle) {
   const resolved = {
@@ -65,6 +68,7 @@ function createHandle(token: string, port = RELAY_PORT): ExtensionRelayHandle {
     port,
     token,
     allowLegacyAuth: true,
+    navigationPolicyKey: NAVIGATION_POLICY_KEY,
     internalToken: `${token.slice(0, 8)}-internal`,
     bridge: {} as ExtensionRelayHandle["bridge"],
     close: vi.fn(async () => {}),
@@ -84,14 +88,17 @@ describe("extension relay lifecycle", () => {
     vi.clearAllMocks();
     readExtensionRelayTokenMock.mockReturnValue(ROTATED_TOKEN);
     ensureExtensionRelayTokenMock.mockReturnValue(ROTATED_TOKEN);
-    startExtensionRelayServerMock.mockImplementation(async ({ port, token, allowLegacyAuth }) => ({
-      port,
-      token,
-      allowLegacyAuth,
-      internalToken: "replacement-internal",
-      bridge: {},
-      close: vi.fn(async () => {}),
-    }));
+    startExtensionRelayServerMock.mockImplementation(
+      async ({ port, token, allowLegacyAuth, navigationPolicy, ssrfPolicy }) => ({
+        port,
+        token,
+        allowLegacyAuth,
+        navigationPolicyKey: JSON.stringify({ navigationPolicy, ssrfPolicy }),
+        internalToken: "replacement-internal",
+        bridge: {},
+        close: vi.fn(async () => {}),
+      }),
+    );
   });
 
   it("rebounds an existing relay when the host-local token rotates", async () => {
@@ -107,6 +114,8 @@ describe("extension relay lifecycle", () => {
       port: RELAY_PORT,
       token: ROTATED_TOKEN,
       allowLegacyAuth: true,
+      navigationPolicy: { version: 1, allow: [], deny: [] },
+      ssrfPolicy: undefined,
     });
     expect(handle.token).toBe(ROTATED_TOKEN);
     expect(state.resolved.extensionRelayToken).toBe(ROTATED_TOKEN);

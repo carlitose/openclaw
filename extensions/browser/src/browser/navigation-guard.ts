@@ -6,6 +6,11 @@
  */
 import { isIP } from "node:net";
 import {
+  classifyNavigationUrl,
+  navigationPolicyIsEmpty,
+  type CompiledNavigationPolicyV1,
+} from "../../chrome-extension/modules/navigation-policy.js";
+import {
   isPrivateNetworkAllowedByPolicy,
   resolvePinnedHostnameWithPolicy,
   type LookupFn,
@@ -56,6 +61,7 @@ export function parseBrowserNavigationUrl(url: string): URL {
 export type BrowserNavigationPolicyOptions = {
   ssrfPolicy?: SsrFPolicy;
   browserProxyMode?: BrowserNavigationProxyMode;
+  navigationPolicy?: CompiledNavigationPolicyV1;
 };
 
 /** Describes whether the browser itself is routing page traffic through a proxy. */
@@ -70,14 +76,27 @@ type BrowserNavigationRequestLike = {
 /** Build a navigation-policy object while omitting default direct proxy mode. */
 export function withBrowserNavigationPolicy(
   ssrfPolicy?: SsrFPolicy,
-  opts?: { browserProxyMode?: BrowserNavigationProxyMode },
+  opts?: {
+    browserProxyMode?: BrowserNavigationProxyMode;
+    navigationPolicy?: CompiledNavigationPolicyV1;
+  },
 ): BrowserNavigationPolicyOptions {
   return {
     ...(ssrfPolicy ? { ssrfPolicy } : {}),
     ...(opts?.browserProxyMode && opts.browserProxyMode !== "direct"
       ? { browserProxyMode: opts.browserProxyMode }
       : {}),
+    ...(opts?.navigationPolicy ? { navigationPolicy: opts.navigationPolicy } : {}),
   };
+}
+
+/** Whether a resolved profile has any navigation boundary to enforce. */
+export function hasBrowserNavigationPolicy(policy: BrowserNavigationPolicyOptions): boolean {
+  return Boolean(
+    policy.ssrfPolicy ||
+    policy.browserProxyMode ||
+    (policy.navigationPolicy && !navigationPolicyIsEmpty(policy.navigationPolicy)),
+  );
 }
 
 /** Return true when strict policy requires redirect-chain inspection. */
@@ -123,6 +142,15 @@ export async function assertBrowserNavigationAllowed(
   } & BrowserNavigationPolicyOptions,
 ): Promise<void> {
   const parsed = parseBrowserNavigationUrl(opts.url);
+
+  if (opts.navigationPolicy) {
+    const decision = classifyNavigationUrl(parsed.href, opts.navigationPolicy);
+    if (decision.status === "denied") {
+      throw new InvalidBrowserNavigationUrlError(
+        `Navigation blocked by browser profile hostname policy (${decision.reason}). Use a hostname allowed by browser.profiles.<name>.navigationPolicy.`,
+      );
+    }
+  }
 
   if (!NETWORK_NAVIGATION_PROTOCOLS.has(parsed.protocol)) {
     if (isAllowedNonNetworkNavigationUrl(parsed)) {
@@ -189,6 +217,14 @@ export async function assertBrowserNavigationResultAllowed(
   } catch {
     return;
   }
+  if (opts.navigationPolicy && !navigationPolicyIsEmpty(opts.navigationPolicy)) {
+    const decision = classifyNavigationUrl(parsed.href, opts.navigationPolicy);
+    if (decision.status === "denied") {
+      throw new InvalidBrowserNavigationUrlError(
+        `Navigation blocked by browser profile hostname policy (${decision.reason}). Use a hostname allowed by browser.profiles.<name>.navigationPolicy.`,
+      );
+    }
+  }
   if (
     NETWORK_NAVIGATION_PROTOCOLS.has(parsed.protocol) ||
     isAllowedNonNetworkNavigationUrl(parsed)
@@ -216,6 +252,7 @@ export async function assertBrowserNavigationRedirectChainAllowed(
       lookupFn: opts.lookupFn,
       ssrfPolicy: opts.ssrfPolicy,
       browserProxyMode: opts.browserProxyMode,
+      navigationPolicy: opts.navigationPolicy,
     });
   }
 }

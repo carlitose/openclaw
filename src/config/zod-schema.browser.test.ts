@@ -28,4 +28,25 @@ describe("browser extension launch profile schema", () => {
   ])("rejects %s (%s)", (profile, _label) => {
     expect(extensionProfile(profile).success).toBe(false);
   });
+
+  it("accepts a bounded profile navigation policy", () => {
+    expect(
+      extensionProfile({
+        navigationPolicy: {
+          allowHostnames: ["example.com", "*.oauth.example.com"],
+          denyHostnames: ["blocked.oauth.example.com"],
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects oversized profile navigation policy lists", () => {
+    expect(
+      extensionProfile({
+        navigationPolicy: {
+          allowHostnames: Array.from({ length: 129 }, (_, index) => `host-${index}.example`),
+        },
+      }).success,
+    ).toBe(false);
+  });
 });

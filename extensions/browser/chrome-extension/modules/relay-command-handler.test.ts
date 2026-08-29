@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRelayCommandHandler } from "./relay-command-handler.js";
+import { createTaskTabLifecycle } from "./task-tab-lifecycle.js";
 
 function createHarness() {
   const send = vi.fn();
@@ -7,34 +8,48 @@ function createHarness() {
   const requireAccessibleTab = vi.fn(async () => ({ id: 7, windowId: 3 }));
   const rememberUtilityWorld = vi.fn();
   const focusWindowForTab = vi.fn(async () => undefined);
+  const addTabToOpenClawGroup = vi.fn(async () => undefined);
   const chromeMock = {
     debugger: { sendCommand: vi.fn(async () => ({ value: 1 })) },
     tabs: {
       create: vi.fn(),
+      get: vi.fn(async (): Promise<{ id: number } | null> => {
+        throw new Error("No tab with id");
+      }),
       remove: vi.fn(async () => undefined),
       update: vi.fn(async () => undefined),
     },
   };
   vi.stubGlobal("chrome", chromeMock);
+  const taskTabs = createTaskTabLifecycle({
+    chromeApi: chromeMock,
+    newGeneration: () => "task-generation-1",
+  });
+  const attachCreatedDebugger = vi.fn(async () => ({ targetId: "target-created" }));
   const handler = createRelayCommandHandler({
     send,
     attachDebugger: vi.fn(),
     detachDebugger: vi.fn(async () => undefined),
-    addTabToOpenClawGroup: vi.fn(),
+    addTabToOpenClawGroup,
     focusWindowForTab,
     scheduleTabsSync: vi.fn(),
     captureAccess: vi.fn(() => epoch),
     requireAccessibleTab,
     rememberUtilityWorld,
+    attachCreatedDebugger,
+    taskTabs,
   });
   return {
     chromeMock,
+    addTabToOpenClawGroup,
+    attachCreatedDebugger,
     epoch,
     focusWindowForTab,
     handler,
     rememberUtilityWorld,
     requireAccessibleTab,
     send,
+    taskTabs,
   };
 }
 
@@ -49,6 +64,37 @@ describe("relay authority rechecks", () => {
       [7, harness.epoch],
     ]);
     expect(harness.send).toHaveBeenCalledWith({ type: "result", seq: 1, result: { value: 1 } });
+  });
+
+  it("allows only the exact task generation to perform its first navigation", async () => {
+    const harness = createHarness();
+    const taskGeneration = harness.taskTabs.registerRoot(7);
+
+    await harness.handler({
+      type: "cdp",
+      seq: 8,
+      tabId: 7,
+      method: "Page.navigate",
+      params: { url: "https://example.com" },
+      taskGeneration,
+    });
+
+    expect(harness.requireAccessibleTab).not.toHaveBeenCalled();
+    expect(harness.chromeMock.debugger.sendCommand).toHaveBeenCalledWith(
+      { tabId: 7 },
+      "Page.navigate",
+      { url: "https://example.com" },
+    );
+
+    await harness.handler({
+      type: "cdp",
+      seq: 9,
+      tabId: 7,
+      method: "Page.navigate",
+      params: { url: "https://example.com/next" },
+      taskGeneration: "stale-task-generation",
+    });
+    expect(harness.requireAccessibleTab).toHaveBeenCalledTimes(2);
   });
 
   it("remembers the root automation world only after the command remains authorized", async () => {
@@ -95,5 +141,51 @@ describe("relay authority rechecks", () => {
       message: "tab 7 access was revoked",
     });
     expect(harness.rememberUtilityWorld).not.toHaveBeenCalled();
+  });
+
+  it("removes the exact physical tab when group authorization fails", async () => {
+    const harness = createHarness();
+    harness.chromeMock.tabs.create.mockResolvedValue({ id: 41, windowId: 3 });
+    harness.addTabToOpenClawGroup.mockRejectedValue(new Error("group denied"));
+
+    await harness.handler({ type: "createTab", seq: 6, url: "https://example.com" });
+
+    expect(harness.chromeMock.tabs.remove).toHaveBeenCalledWith(41);
+    expect(harness.send).toHaveBeenCalledWith({
+      type: "error",
+      seq: 6,
+      message: "group denied",
+      details: {
+        kind: "tab-creation-failed",
+        tabId: 41,
+        cleanup: { status: "complete", remainingTabIds: [], errors: [] },
+      },
+    });
+  });
+
+  it("reports both attach failure and incomplete exact cleanup", async () => {
+    const harness = createHarness();
+    harness.chromeMock.tabs.create.mockResolvedValue({ id: 42, windowId: 3 });
+    harness.attachCreatedDebugger.mockRejectedValue(new Error("debugger attach denied"));
+    harness.chromeMock.tabs.remove.mockRejectedValue(new Error("tab removal denied"));
+    harness.chromeMock.tabs.get.mockResolvedValue({ id: 42 });
+
+    await harness.handler({ type: "createTab", seq: 7, url: "about:blank" });
+
+    expect(harness.send).toHaveBeenCalledWith({
+      type: "error",
+      seq: 7,
+      message:
+        "debugger attach denied; exact tab cleanup is incomplete—close tab 42 manually before retrying",
+      details: {
+        kind: "tab-creation-failed",
+        tabId: 42,
+        cleanup: {
+          status: "incomplete",
+          remainingTabIds: [42],
+          errors: [{ tabId: 42, message: "tab removal denied" }],
+        },
+      },
+    });
   });
 });

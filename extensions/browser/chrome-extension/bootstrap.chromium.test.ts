@@ -177,7 +177,7 @@ describe.runIf(runE2E)("Chrome native bootstrap Chromium E2E", () => {
     );
     await fs.writeFile(
       configPath,
-      `${JSON.stringify({ gateway: { port: gatewayPort }, browser: { profiles: { e2e: { driver: "extension", cdpPort: relayPort } } } })}\n`,
+      `${JSON.stringify({ gateway: { port: gatewayPort }, browser: { ssrfPolicy: { dangerouslyAllowPrivateNetwork: true }, profiles: { e2e: { driver: "extension", cdpPort: relayPort } } } })}\n`,
       { mode: 0o600 },
     );
     await withEnvAsync(
@@ -208,9 +208,16 @@ describe.runIf(runE2E)("Chrome native bootstrap Chromium E2E", () => {
           nativeHostPath,
         };
         const gatewayServer = http.createServer((req, res) => {
-          if (req.url === "/browser-owner-proof") {
+          if (req.url === "/browser-owner-proof" || req.url === "/navigation-proof") {
             res.writeHead(200, { "content-type": "text/html" });
-            res.end("<title>OpenClaw selected tab</title>");
+            res.end(
+              '<title>OpenClaw E2E</title><style>body{margin:0}#spacer{height:2200px}#target{display:block;width:240px;height:96px;background:#1457d9;color:white;border:0;font:20px sans-serif}</style><div id="spacer"></div><button id="target">Offscreen target</button>',
+            );
+            return;
+          }
+          if (req.url === "/unrelated") {
+            res.writeHead(200, { "content-type": "text/html" });
+            res.end("<title>Unrelated tab</title>");
             return;
           }
           res.writeHead(426);
@@ -305,11 +312,8 @@ describe.runIf(runE2E)("Chrome native bootstrap Chromium E2E", () => {
         expect(await waitForExtensionId(context, installed)).toBe(predictedId);
         process.stderr.write("[browser-extension-e2e] persisted extension reloaded\n");
         const controlled = await context.newPage();
-        await controlled.goto(
-          `data:text/html,${encodeURIComponent(
-            '<title>OpenClaw E2E</title><style>body{margin:0}#spacer{height:2200px}#target{display:block;width:240px;height:96px;background:#1457d9;color:white;border:0;font:20px sans-serif}</style><div id="spacer"></div><button id="target">Offscreen target</button>',
-          )}`,
-        );
+        const controlledUrl = `http://127.0.0.1:${gatewayPort}/browser-owner-proof`;
+        await controlled.goto(controlledUrl);
 
         const extensionPage = await context.newPage();
         await extensionPage.goto(`chrome-extension://${extensionId}/options.html`);
@@ -382,7 +386,6 @@ describe.runIf(runE2E)("Chrome native bootstrap Chromium E2E", () => {
             JSON.stringify({ Authorization: relayAuthorization }),
           ],
         };
-        browserState.resolved.ssrfPolicy = undefined;
         const routeContext = createBrowserRouteContext({
           getState: () => browserState,
           refreshConfigFromDisk: false,
@@ -413,7 +416,7 @@ describe.runIf(runE2E)("Chrome native bootstrap Chromium E2E", () => {
         });
         const tabs = (tabsResponse.body as { tabs?: Array<{ targetId?: string; url?: string }> })
           .tabs;
-        const controlledTab = tabs?.find((tab) => tab.url?.startsWith("data:text/html"));
+        const controlledTab = tabs?.find((tab) => tab.url === controlledUrl);
         if (!controlledTab?.targetId) {
           throw new Error(`Existing-session E2E tab missing: ${JSON.stringify(tabsResponse.body)}`);
         }
@@ -493,7 +496,7 @@ describe.runIf(runE2E)("Chrome native bootstrap Chromium E2E", () => {
         process.stderr.write(`[browser-extension-e2e] screenshot proof ${proofPath}\n`);
 
         const distractingPage = await context.newPage();
-        const distractingUrl = `data:text/html,${encodeURIComponent("<title>Unrelated tab</title>")}`;
+        const distractingUrl = `http://127.0.0.1:${gatewayPort}/unrelated`;
         await distractingPage.goto(distractingUrl);
         await expect
           .poll(() => relay.bridge.accessibleTabs().some((tab) => tab.url === distractingUrl))
@@ -504,16 +507,16 @@ describe.runIf(runE2E)("Chrome native bootstrap Chromium E2E", () => {
           query: { profile: "e2e" },
         });
         const liveTabs = (
-          liveTabsResponse.body as { tabs?: Array<{ targetId?: string; url?: string }> }
+          liveTabsResponse.body as {
+            tabs?: Array<{ targetId?: string; title?: string; url?: string }>;
+          }
         ).tabs;
-        const selectedTab = liveTabs?.find((tab) => tab.url === controlled.url());
-        const unrelatedTab = liveTabs?.find((tab) => tab.url === distractingUrl);
+        const selectedTab = liveTabs?.find((tab) => tab.title === "OpenClaw E2E");
+        const unrelatedTab = liveTabs?.find((tab) => tab.title === "Unrelated tab");
         if (!selectedTab?.targetId || !unrelatedTab?.targetId) {
           throw new Error(`Extension navigation proof tabs missing: ${JSON.stringify(liveTabs)}`);
         }
         expect(selectedTab.targetId).not.toBe(unrelatedTab.targetId);
-        const previousSsrfPolicy = browserState.resolved.ssrfPolicy;
-        browserState.resolved.ssrfPolicy = { allowPrivateNetwork: true };
         const extensionCdpUrl = routeContext.forProfile("e2e").profile.cdpUrl;
         const actedPage = await getPageForTargetId({
           cdpUrl: extensionCdpUrl,
@@ -530,14 +533,14 @@ describe.runIf(runE2E)("Chrome native bootstrap Chromium E2E", () => {
             query: { profile: "e2e" },
             body: {
               targetId: selectedTab.targetId,
-              url: `http://127.0.0.1:${gatewayPort}/browser-owner-proof`,
+              url: `http://127.0.0.1:${gatewayPort}/navigation-proof`,
             },
           });
           expect(navigationResponse.status, JSON.stringify(navigationResponse.body)).toBe(200);
           expect(navigationResponse.body).toMatchObject({
             ok: true,
             targetId: selectedTab.targetId,
-            url: `http://127.0.0.1:${gatewayPort}/browser-owner-proof`,
+            url: `http://127.0.0.1:${gatewayPort}/navigation-proof`,
           });
           expect(detachedNavigation).toHaveBeenCalledTimes(1);
           const recoveredPage = await getPageForTargetId({
@@ -552,7 +555,6 @@ describe.runIf(runE2E)("Chrome native bootstrap Chromium E2E", () => {
           );
         } finally {
           detachedNavigation.mockRestore();
-          browserState.resolved.ssrfPolicy = previousSsrfPolicy;
         }
 
         const registration = status.registrations.find(
@@ -626,14 +628,12 @@ describe.runIf(runE2E)("Chrome native bootstrap Chromium E2E", () => {
         process.stderr.write("[browser-extension-e2e] launcher probe passed\n");
 
         await expect
-          .poll(() =>
-            relay.bridge.accessibleTabs().some((tab) => tab.url.startsWith("data:text/html")),
-          )
+          .poll(() => relay.bridge.accessibleTabs().some((tab) => tab.url === distractingUrl))
           .toBe(true);
 
         const tabId = relay.bridge
           .accessibleTabs()
-          .find((tab) => tab.url.startsWith("data:text/html"))?.tabId;
+          .find((tab) => tab.url === distractingUrl)?.tabId;
         if (tabId === undefined) {
           throw new Error("Ungrouped E2E tab was not exposed in All tabs mode");
         }

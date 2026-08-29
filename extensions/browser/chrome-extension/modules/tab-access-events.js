@@ -19,6 +19,13 @@ export function registerTabAccessEvents({
   removeTabFromOpenClawGroup,
   placeTabInGroup,
   runAccessMutation,
+  classifyDescendantNavigation,
+  taskTabs = {
+    registerDescendant: () => null,
+    forget: () => undefined,
+    replace: () => false,
+    revoke: () => undefined,
+  },
   getUtilityWorldName,
   forgetUtilityWorld,
 }) {
@@ -30,6 +37,7 @@ export function registerTabAccessEvents({
     isTabInOpenClawGroup,
     placeTabInGroup,
     removeTabFromGroup: removeTabFromOpenClawGroup,
+    ...(classifyDescendantNavigation ? { classifyNavigation: classifyDescendantNavigation } : {}),
     scheduleTabsSync,
     runAccessMutation,
   });
@@ -124,6 +132,7 @@ export function registerTabAccessEvents({
     if (reason !== "canceled_by_user") {
       return;
     }
+    taskTabs.revoke(source.tabId);
     const revocation = policy.beginRevocation(source.tabId);
     void runAccessMutation(async () => {
       try {
@@ -141,10 +150,20 @@ export function registerTabAccessEvents({
     }).catch(() => undefined);
   });
 
-  chromeApi.tabs.onCreated.addListener((tab) => descendantContainment.onCreated(tab));
+  chromeApi.tabs.onCreated.addListener((tab) => {
+    if (typeof tab.openerTabId === "number" && typeof tab.id === "number") {
+      taskTabs.registerDescendant(tab.openerTabId, tab.id);
+    }
+    descendantContainment.onCreated(tab);
+  });
 
   chromeApi.tabs.onRemoved.addListener((tabId) => {
     descendantContainment.onRemoved(tabId);
+    const taskGeneration = taskTabs.generationFor?.(tabId);
+    taskTabs.forget(tabId);
+    if (taskGeneration) {
+      send({ type: "taskTabRemoved", tabId, taskGeneration });
+    }
     void (async () => {
       await accessReady;
       policy.invalidateTab(tabId);
@@ -159,6 +178,7 @@ export function registerTabAccessEvents({
   });
 
   chromeApi.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
+    taskTabs.replace(addedTabId, removedTabId);
     const revocation = policy.beginRevocation(addedTabId);
     policy.invalidateTab(removedTabId);
     attachedTabs.delete(removedTabId);
@@ -183,10 +203,7 @@ export function registerTabAccessEvents({
   chromeApi.tabs.onUpdated.addListener((tabId, changeInfo) => {
     scheduleTabsSync();
     const urlChanged = typeof changeInfo.url === "string";
-    if (
-      urlChanged ||
-      (policy.mode === ACCESS_MODE_SELECTED && typeof changeInfo.groupId === "number")
-    ) {
+    if (urlChanged || typeof changeInfo.groupId === "number") {
       // Security contract: every URL change retires synchronous CDP authority.
       // Pre-proof events intentionally drop; replay could cross a restricted destination.
       policy.invalidateTab(tabId);
@@ -204,11 +221,17 @@ export function registerTabAccessEvents({
         return;
       }
       if (!state.accessible) {
+        if (state.reason === "not-selected" || state.reason === "paused") {
+          taskTabs.revoke(tabId);
+        }
         await Promise.allSettled([attachingTabs.get(tabId)]);
         if (!eventIsCurrent()) {
           return;
         }
         await detachDebugger(tabId);
+      }
+      if (state.accessible && attachedTabs.has(tabId) && !attachedAccessEpochs.has(tabId)) {
+        attachedAccessEpochs.set(tabId, eventEpoch);
       }
       if (attachedTabs.has(tabId) && attachedAccessEpochs.has(tabId)) {
         if (!urlChanged) {

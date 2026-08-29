@@ -101,6 +101,7 @@ export function createProfileTabOps({ profile, state, runtime }: TabOpsDeps): Pr
   const getCdpControlPolicy = () => resolveCdpControlPolicy(profile, state().resolved.ssrfPolicy);
   const getNavigationPolicy = () =>
     withBrowserNavigationPolicy(state().resolved.ssrfPolicy, {
+      navigationPolicy: profile.compiledNavigationPolicy,
       browserProxyMode: resolveBrowserNavigationProxyMode({
         resolved: state().resolved,
         profile,
@@ -349,6 +350,7 @@ export function createProfileTabOps({ profile, state, runtime }: TabOpsDeps): Pr
       cdpUrl: profile.cdpUrl,
       url,
       ssrfPolicy: getCdpControlPolicy(),
+      navigationPolicy: profile.compiledNavigationPolicy,
       waitForNavigationResult: true,
     };
     if (cdpActionTimeouts) {

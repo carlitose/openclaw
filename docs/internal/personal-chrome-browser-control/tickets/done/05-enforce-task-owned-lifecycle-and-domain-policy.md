@@ -14,11 +14,11 @@ blocked_by:
 
 - Artifact ID: `artifact:ticket-personal-chrome-browser-control-05`
 - Role: `ticket`
-- Parent: [Personal Chrome browser control](../WAYFINDER.md)
+- Parent: [Personal Chrome browser control](../../WAYFINDER.md)
 
 ## Parent Spec
 
-[Personal Chrome browser control](../WAYFINDER.md)
+[Personal Chrome browser control](../../WAYFINDER.md)
 
 ## What to Build
 

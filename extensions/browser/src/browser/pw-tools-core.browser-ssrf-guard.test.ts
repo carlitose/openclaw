@@ -1117,6 +1117,32 @@ describe("pw-tools-core browser SSRF guards", () => {
     ).toBeLessThan(requireInvocationOrder(ariaSnapshot.mock, "ARIA snapshot invocation"));
   });
 
+  it("re-checks snapshots when hostname policy is the only configured boundary", async () => {
+    const navigationPolicy = {
+      version: 1 as const,
+      allow: [{ kind: "exact" as const, hostname: "example.com" }],
+      deny: [],
+    };
+    pageState.page = createSnapshotPage({
+      ariaSnapshot: vi.fn(async () => 'button "Save"'),
+      url: vi.fn(() => "https://example.com"),
+    });
+
+    await snapshots.snapshotAiViaPlaywright({
+      cdpUrl: "http://127.0.0.1:18792",
+      targetId: "tab-1",
+      navigationPolicy,
+    });
+
+    expect(sessionMocks.assertPageNavigationCompletedSafely).toHaveBeenCalledWith({
+      cdpUrl: "http://127.0.0.1:18792",
+      targetId: "tab-1",
+      page: pageState.page,
+      response: null,
+      navigationPolicy,
+    });
+  });
+
   it("re-checks current page URL before role snapshots", async () => {
     const ariaSnapshot = vi.fn(async () => "");
     pageState.page = createSnapshotPage({

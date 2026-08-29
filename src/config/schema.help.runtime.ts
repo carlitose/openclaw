@@ -43,6 +43,12 @@ export const RUNTIME_FIELD_HELP: Record<string, string> = {
     "Per-profile headless override for locally launched browser instances. Use this when one profile should stay headless without forcing browser.headless for every other profile.",
   "browser.profiles.*.attachOnly":
     "Per-profile attach-only override that skips local browser launch and only attaches to an existing CDP endpoint. Useful when one profile is externally managed but others are locally launched.",
+  "browser.profiles.*.navigationPolicy":
+    "Optional per-profile hostname boundary applied cumulatively with browser SSRF policy to create, navigation, redirects, popups, inventory, and attach eligibility. Use it to confine a profile to named sites.",
+  "browser.profiles.*.navigationPolicy.allowHostnames":
+    "Allowed exact hostnames or explicit subdomain patterns such as *.example.com. Use an empty list to allow any hostname not denied.",
+  "browser.profiles.*.navigationPolicy.denyHostnames":
+    "Denied exact hostnames or explicit subdomain patterns. Use deny entries for exclusions; they always override allow entries.",
   "browser.evaluateEnabled":
     "Enables browser-side evaluate helpers for runtime script evaluation capabilities where supported. Keep disabled unless your workflows require evaluate semantics beyond snapshots/navigation.",
   "browser.snapshotDefaults":

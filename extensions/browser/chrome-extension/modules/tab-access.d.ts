@@ -11,7 +11,13 @@ export type TabAccessEpoch = Readonly<{
   tabRevision: number;
 }>;
 
-export type TabAccessReason = TabEligibilityReason | "revoked" | "paused" | "not-selected" | null;
+export type TabAccessReason =
+  | TabEligibilityReason
+  | "revoked"
+  | "paused"
+  | "not-selected"
+  | "navigation-policy"
+  | null;
 
 export type TabAccessState = {
   accessible: boolean;
@@ -19,6 +25,12 @@ export type TabAccessState = {
   denied: boolean;
   reason: TabAccessReason;
   tab: BrowserTabSnapshot | null;
+};
+
+export type TabNavigationDecision = {
+  status: "allowed" | "denied" | "pending";
+  reason?: string;
+  message?: string;
 };
 
 export type TabAccessStorageArea = {
@@ -51,7 +63,11 @@ export type TabAccessPolicy = {
   epochIsCurrent(tabId: number, epoch: TabAccessEpoch): boolean;
   invalidateTab(tabId: number): void;
   invalidateAll(): void;
-  inspectTab(tabId: number, epoch?: TabAccessEpoch): Promise<TabAccessState>;
+  inspectTab(
+    tabId: number,
+    epoch?: TabAccessEpoch,
+    options?: { enforceNavigationPolicy?: boolean },
+  ): Promise<TabAccessState>;
   requireTab(tabId: number, epoch?: TabAccessEpoch): Promise<AccessibleBrowserTabSnapshot>;
   listAccessibleTabs(options?: {
     allowDuringTransition?: boolean;
@@ -67,4 +83,7 @@ export type TabAccessPolicy = {
 export function createTabAccessPolicy(options: {
   chromeApi?: TabAccessChromeApi;
   isSelectedTab(tab: BrowserTabSnapshot): boolean | Promise<boolean>;
+  classifyNavigation?: (
+    tab: BrowserTabSnapshot,
+  ) => TabNavigationDecision | Promise<TabNavigationDecision>;
 }): TabAccessPolicy;

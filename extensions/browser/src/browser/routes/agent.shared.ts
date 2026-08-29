@@ -91,6 +91,7 @@ export function browserNavigationPolicyForProfile(
   profileCtx: ProfileContext,
 ) {
   return withBrowserNavigationPolicy(ctx.state().resolved.ssrfPolicy, {
+    navigationPolicy: profileCtx.profile.compiledNavigationPolicy,
     browserProxyMode: resolveBrowserNavigationProxyMode({
       resolved: ctx.state().resolved,
       profile: profileCtx.profile,

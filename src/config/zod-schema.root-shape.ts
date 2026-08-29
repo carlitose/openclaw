@@ -186,6 +186,12 @@ export const OpenClawSchemaShape = {
               headless: z.boolean().optional(),
               executablePath: z.string().optional(),
               attachOnly: z.boolean().optional(),
+              navigationPolicy: z
+                .strictObject({
+                  allowHostnames: z.array(z.string().trim().min(1).max(255)).max(128).optional(),
+                  denyHostnames: z.array(z.string().trim().min(1).max(255)).max(128).optional(),
+                })
+                .optional(),
             })
             .refine(
               (value) =>

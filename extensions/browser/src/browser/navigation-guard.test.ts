@@ -1,5 +1,6 @@
 // Browser tests cover navigation guard plugin behavior.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { compileNavigationPolicy } from "../../chrome-extension/modules/navigation-policy.js";
 import { SsrFBlockedError, type LookupFn } from "../infra/net/ssrf.js";
 import {
   assertBrowserNavigationAllowed,
@@ -47,6 +48,36 @@ describe("browser navigation guard", () => {
         url: "about:blank",
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it("applies profile hostname denial before DNS and across redirects", async () => {
+    const lookupFn = createLookupFn("93.184.216.34");
+    const navigationPolicy = compileNavigationPolicy({
+      allowHostnames: ["*.example.com"],
+      denyHostnames: ["blocked.example.com"],
+    });
+    await expect(
+      assertBrowserNavigationAllowed({
+        url: "https://blocked.example.com/start",
+        navigationPolicy,
+        lookupFn,
+      }),
+    ).rejects.toBeInstanceOf(InvalidBrowserNavigationUrlError);
+    expect(lookupFn).not.toHaveBeenCalled();
+
+    await expect(
+      assertBrowserNavigationRedirectChainAllowed({
+        request: {
+          url: () => "https://blocked.example.com/final",
+          redirectedFrom: () => ({
+            url: () => "https://allowed.example.com/start",
+            redirectedFrom: () => null,
+          }),
+        },
+        navigationPolicy,
+        lookupFn,
+      }),
+    ).rejects.toBeInstanceOf(InvalidBrowserNavigationUrlError);
   });
 
   it("blocks file URLs", async () => {

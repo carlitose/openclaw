@@ -5,6 +5,7 @@
  * policy checks and profile reachability probes.
  */
 import { clampPositiveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
+import { navigationPolicyIsEmpty } from "../../../chrome-extension/modules/navigation-policy.js";
 import {
   BrowserProfileUnavailableError,
   BrowserTabNotFoundError,
@@ -26,6 +27,16 @@ import { jsonBrowserError, jsonError, runProfileRouteOperation, toStringOrEmpty 
 
 const DEFAULT_TAB_REACHABILITY_TIMEOUT_MS = 300;
 const TAB_REACHABILITY_RETRY_DELAY_MS = 250;
+
+function hasTabNavigationPolicy(
+  policy: ReturnType<typeof browserNavigationPolicyForProfile>,
+): boolean {
+  return Boolean(
+    policy.ssrfPolicy ||
+    policy.browserProxyMode ||
+    (policy.navigationPolicy && !navigationPolicyIsEmpty(policy.navigationPolicy)),
+  );
+}
 
 function handleTabsRouteError(
   ctx: BrowserRouteContext,
@@ -117,7 +128,7 @@ async function redactBlockedTabUrls(params: {
   tabs: Awaited<ReturnType<ProfileContext["listTabs"]>>;
   navigationPolicy: ReturnType<typeof browserNavigationPolicyForProfile>;
 }): Promise<Awaited<ReturnType<ProfileContext["listTabs"]>>> {
-  if (!params.navigationPolicy.ssrfPolicy) {
+  if (!hasTabNavigationPolicy(params.navigationPolicy)) {
     return params.tabs;
   }
 
@@ -294,7 +305,7 @@ export function registerBrowserTabRoutes(app: BrowserRouteRegistrar, ctx: Browse
           throw new BrowserTabNotFoundError({ input: id });
         }
         const ssrfPolicyOpts = browserNavigationPolicyForProfile(ctx, profileCtx);
-        if (ssrfPolicyOpts.ssrfPolicy) {
+        if (hasTabNavigationPolicy(ssrfPolicyOpts)) {
           await assertBrowserNavigationResultAllowed({
             url: tab.url,
             ...ssrfPolicyOpts,
@@ -414,7 +425,7 @@ export function registerBrowserTabRoutes(app: BrowserRouteRegistrar, ctx: Browse
           throw new BrowserTabNotFoundError();
         }
         const ssrfPolicyOpts = browserNavigationPolicyForProfile(ctx, profileCtx);
-        if (ssrfPolicyOpts.ssrfPolicy) {
+        if (hasTabNavigationPolicy(ssrfPolicyOpts)) {
           await assertBrowserNavigationResultAllowed({
             url: target.url,
             ...ssrfPolicyOpts,

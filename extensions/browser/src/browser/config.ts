@@ -11,6 +11,10 @@ import {
   normalizeOptionalString,
   normalizeOptionalTrimmedStringList,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
+import {
+  compileNavigationPolicy,
+  type CompiledNavigationPolicyV1,
+} from "../../chrome-extension/modules/navigation-policy.js";
 import type { BrowserConfig, BrowserProfileConfig, OpenClawConfig } from "../config/config.js";
 import { resolveGatewayPort } from "../config/paths.js";
 import {
@@ -126,6 +130,7 @@ export type ResolvedBrowserProfile = {
   headless: boolean;
   headlessSource?: "profile" | "config" | "default";
   attachOnly: boolean;
+  compiledNavigationPolicy?: CompiledNavigationPolicyV1;
 };
 
 /** Read a named browser profile without falling through to inherited object keys. */
@@ -515,6 +520,10 @@ export function resolveProfile(
   const headlessSource =
     typeof profile.headless === "boolean" ? "profile" : resolved.headlessSource;
   const executablePath = normalizeExecutablePath(profile.executablePath) ?? resolved.executablePath;
+  const navigationPolicy = compileNavigationPolicy(
+    profile.navigationPolicy,
+    `browser.profiles.${profileName}.navigationPolicy`,
+  );
 
   if (driver === "extension") {
     // Each extension profile needs its own loopback relay port. Explicit
@@ -545,6 +554,7 @@ export function resolveProfile(
       headless: false,
       headlessSource: "default",
       attachOnly: true,
+      compiledNavigationPolicy: navigationPolicy,
     };
   }
 
@@ -565,6 +575,7 @@ export function resolveProfile(
       headless,
       headlessSource,
       attachOnly: true,
+      compiledNavigationPolicy: navigationPolicy,
     };
   }
 
@@ -613,6 +624,7 @@ export function resolveProfile(
     headless,
     headlessSource,
     attachOnly: profile.attachOnly ?? resolved.attachOnly,
+    compiledNavigationPolicy: navigationPolicy,
   };
 }
 

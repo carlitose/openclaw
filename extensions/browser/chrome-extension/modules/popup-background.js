@@ -266,7 +266,11 @@ export function createPopupMessageHandler({
               policy.endRevocation(revocation);
             }
             const state = await policy.inspectTab(tabId);
-            sendResponse({ ok: true, accessible: state.accessible, denied: state.denied });
+            sendResponse({
+              ok: true,
+              accessible: state.accessible,
+              denied: policy.isDenied(tabId),
+            });
             return;
           }
           case "getTabAccess": {

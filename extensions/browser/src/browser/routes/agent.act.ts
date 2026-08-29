@@ -6,6 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises";
  * control or Chrome MCP existing-session operations with navigation guards.
  */
 import { expectDefined } from "openclaw/plugin-sdk/expect-runtime";
+import { navigationPolicyIsEmpty } from "../../../chrome-extension/modules/navigation-policy.js";
 import { formatErrorMessage, toErrorObject } from "../../infra/errors.js";
 import {
   ChromeMcpDocumentUnavailableError,
@@ -92,9 +93,15 @@ async function assertExistingSessionPostInteractionNavigationAllowed(
     },
 ): Promise<void> {
   const navigationPolicy = withBrowserNavigationPolicy(params.ssrfPolicy, {
+    navigationPolicy: params.navigationPolicy,
     browserProxyMode: params.browserProxyMode,
   });
-  if (!navigationPolicy.ssrfPolicy && !navigationPolicy.browserProxyMode) {
+  if (
+    !navigationPolicy.ssrfPolicy &&
+    !navigationPolicy.browserProxyMode &&
+    (!navigationPolicy.navigationPolicy ||
+      navigationPolicyIsEmpty(navigationPolicy.navigationPolicy))
+  ) {
     return;
   }
   const listTabs = params.listTabs;
@@ -242,6 +249,7 @@ async function waitForExistingSessionCondition(
     fn?: string;
     ssrfPolicy?: BrowserNavigationPolicyOptions["ssrfPolicy"];
     browserProxyMode?: BrowserNavigationPolicyOptions["browserProxyMode"];
+    navigationPolicy?: BrowserNavigationPolicyOptions["navigationPolicy"];
   },
 ): Promise<void> {
   if (params.timeMs && params.timeMs > 0) {
@@ -267,6 +275,7 @@ async function waitForExistingSessionCondition(
           await assertBrowserNavigationResultAllowed({
             url,
             ...withBrowserNavigationPolicy(params.ssrfPolicy, {
+              navigationPolicy: params.navigationPolicy,
               browserProxyMode: params.browserProxyMode,
             }),
           });
@@ -468,7 +477,10 @@ export function registerBrowserAgentActRoutes(
           signal,
         };
         const hasNavigationResultPolicy = Boolean(
-          navigationPolicy.ssrfPolicy || navigationPolicy.browserProxyMode,
+          navigationPolicy.ssrfPolicy ||
+          navigationPolicy.browserProxyMode ||
+          (navigationPolicy.navigationPolicy &&
+            !navigationPolicyIsEmpty(navigationPolicy.navigationPolicy)),
         );
         const resolveRelayTarget = captureBrowserOperationTarget({
           ctx,

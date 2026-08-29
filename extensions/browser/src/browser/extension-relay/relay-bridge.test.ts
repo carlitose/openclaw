@@ -1,5 +1,6 @@
 // Extension relay bridge: CDP target synthesis and extension command routing.
 import { describe, expect, it, vi } from "vitest";
+import { compileNavigationPolicy } from "../../../chrome-extension/modules/navigation-policy.js";
 import { ExtensionRelayBridge } from "./relay-bridge.js";
 import type { ExtensionToRelayMessage, RelayToExtensionMessage } from "./relay-protocol.js";
 
@@ -70,7 +71,11 @@ function replyFor(msg: RelayToExtensionMessage): ExtensionToRelayMessage | null 
     case "closeTab":
       return { type: "result", seq: msg.seq, result: {} };
     case "createTab":
-      return { type: "result", seq: msg.seq, result: { tabId: 999 } };
+      return {
+        type: "result",
+        seq: msg.seq,
+        result: { tabId: 999, targetId: "target-999", taskGeneration: "task-generation-999" },
+      };
     case "cdp":
       return { type: "result", seq: msg.seq, result: { ok: true, echoed: msg.method } };
     default:
@@ -78,13 +83,37 @@ function replyFor(msg: RelayToExtensionMessage): ExtensionToRelayMessage | null 
   }
 }
 
-function sendHello(handlers: { onMessage: (raw: string) => void }, tabs = defaultTabs()) {
+function sendHello(
+  handlers: { onMessage: (raw: string) => void },
+  tabs = defaultTabs(),
+  extensionInstanceId?: string,
+) {
   handlers.onMessage(
     JSON.stringify({
       type: "hello",
       userAgent: "Mozilla/5.0 Chrome/144.0.0.0",
       browserVersion: "Chrome/144.0.0.0",
       extensionVersion: "2.0.0",
+      ...(extensionInstanceId ? { extensionInstanceId } : {}),
+      tabs,
+    }),
+  );
+}
+
+function installAndSendPolicyHello(
+  socket: FakeSocket,
+  handlers: ReturnType<ExtensionRelayBridge["attachExtensionSocket"]>,
+  tabs = defaultTabs(),
+) {
+  handlers.installNavigationPolicy();
+  const installation = socket.frames().at(-1) as { nonce: string };
+  handlers.onMessage(
+    JSON.stringify({
+      type: "hello",
+      userAgent: "Mozilla/5.0 Chrome/144.0.0.0",
+      browserVersion: "Chrome/144.0.0.0",
+      extensionVersion: "2.0.0",
+      navigationPolicyNonce: installation.nonce,
       tabs,
     }),
   );
@@ -100,6 +129,182 @@ const flush = () =>
   });
 
 describe("ExtensionRelayBridge", () => {
+  it("requires the exact connection policy nonce before promoting a restricted profile", () => {
+    const bridge = new ExtensionRelayBridge({
+      navigationPolicy: compileNavigationPolicy({ allowHostnames: ["example.com"] }),
+    });
+    const stale = wireExtension(bridge);
+    stale.handlers.installNavigationPolicy();
+    sendHello(stale.handlers);
+    expect(stale.socket).toMatchObject({ closed: true, closeCode: 4001 });
+
+    const current = wireExtension(bridge);
+    installAndSendPolicyHello(current.socket, current.handlers);
+    expect(bridge.extensionConnected).toBe(true);
+    bridge.dispose();
+  });
+
+  it("blocks direct CDP create and navigate before extension dispatch", async () => {
+    const bridge = new ExtensionRelayBridge({
+      navigationPolicy: compileNavigationPolicy({
+        allowHostnames: ["example.com"],
+        denyHostnames: ["blocked.example.com"],
+      }),
+      ssrfPolicy: { dangerouslyAllowPrivateNetwork: true },
+      lookupFn: async () => [{ address: "93.184.216.34", family: 4 }],
+    });
+    const extension = wireExtension(bridge);
+    installAndSendPolicyHello(extension.socket, extension.handlers);
+    const client = new FakeSocket();
+    const cdp = bridge.attachCdpClientSocket(client);
+
+    cdp.onMessage(
+      JSON.stringify({
+        id: 1,
+        method: "Target.createTarget",
+        params: { url: "https://blocked.example.com" },
+      }),
+    );
+    await flush();
+    expect(client.frames().find((frame) => frame.id === 1)?.error).toBeTruthy();
+    expect(extension.socket.frames()).not.toContainEqual(
+      expect.objectContaining({ type: "createTab" }),
+    );
+
+    cdp.onMessage(
+      JSON.stringify({ id: 2, method: "Target.setAutoAttach", params: { autoAttach: true } }),
+    );
+    await flush();
+    const attached = client.frames().find((frame) => frame.method === "Target.attachedToTarget");
+    const sessionId = (attached?.params as { sessionId?: string })?.sessionId;
+    cdp.onMessage(
+      JSON.stringify({
+        id: 3,
+        sessionId,
+        method: "Page.navigate",
+        params: { url: "https://blocked.example.com" },
+      }),
+    );
+    await flush();
+    expect(client.frames().find((frame) => frame.id === 3)?.error).toBeTruthy();
+    expect(extension.socket.frames()).not.toContainEqual(
+      expect.objectContaining({ type: "cdp", method: "Page.navigate" }),
+    );
+
+    cdp.onMessage(JSON.stringify({ id: 4, sessionId, method: "Page.navigate", params: {} }));
+    cdp.onMessage(JSON.stringify({ id: 5, method: "Target.createTarget", params: { url: 42 } }));
+    await flush();
+    expect(client.frames().find((frame) => frame.id === 4)?.error).toBeTruthy();
+    expect(client.frames().find((frame) => frame.id === 5)?.error).toBeTruthy();
+    expect(extension.socket.frames()).not.toContainEqual(
+      expect.objectContaining({ type: "createTab", url: 42 }),
+    );
+    bridge.dispose();
+  });
+
+  it("publishes policy-bound inventory only after the relay approves the exact URL", async () => {
+    const bridge = new ExtensionRelayBridge({
+      navigationPolicy: compileNavigationPolicy({ allowHostnames: ["example.com"] }),
+      ssrfPolicy: { dangerouslyAllowPrivateNetwork: true },
+      lookupFn: async () => [{ address: "93.184.216.34", family: 4 }],
+    });
+    const extension = wireExtension(bridge);
+    installAndSendPolicyHello(extension.socket, extension.handlers);
+    expect(bridge.accessibleTabs()).toEqual([]);
+
+    const installation = extension.socket
+      .frames()
+      .find((frame) => frame.type === "navigationPolicy.v1") as { nonce: string };
+    extension.handlers.onMessage(
+      JSON.stringify({
+        type: "navigationCheck",
+        seq: 77,
+        nonce: installation.nonce,
+        tabId: 1,
+        url: "https://example.com",
+      }),
+    );
+    await flush();
+    extension.handlers.onMessage(JSON.stringify({ type: "tabs", tabs: defaultTabs() }));
+
+    expect(extension.socket.frames()).toContainEqual({
+      type: "navigationDecision",
+      seq: 77,
+      nonce: installation.nonce,
+      allowed: true,
+    });
+    expect(bridge.accessibleTabs()).toEqual(defaultTabs());
+    bridge.dispose();
+  });
+
+  it("keeps the latest URL approval when navigation checks finish out of order", async () => {
+    const lookups = new Map<string, (addresses: Array<{ address: string; family: 4 }>) => void>();
+    const bridge = new ExtensionRelayBridge({
+      navigationPolicy: compileNavigationPolicy({ allowHostnames: ["*.example.com"] }),
+      lookupFn: async (hostname) =>
+        await new Promise((resolve) => {
+          lookups.set(hostname, resolve);
+        }),
+    });
+    const extension = wireExtension(bridge);
+    installAndSendPolicyHello(extension.socket, extension.handlers, []);
+    const installation = extension.socket
+      .frames()
+      .find((frame) => frame.type === "navigationPolicy.v1") as { nonce: string };
+
+    for (const [seq, hostname] of [
+      [80, "first.example.com"],
+      [81, "latest.example.com"],
+    ] as const) {
+      extension.handlers.onMessage(
+        JSON.stringify({
+          type: "navigationCheck",
+          seq,
+          nonce: installation.nonce,
+          tabId: 7,
+          url: `https://${hostname}`,
+        }),
+      );
+    }
+    await vi.waitFor(() => expect([...lookups.keys()]).toHaveLength(2));
+
+    lookups.get("latest.example.com")?.([{ address: "93.184.216.34", family: 4 }]);
+    await flush();
+    const latestTab = {
+      tabId: 7,
+      url: "https://latest.example.com",
+      title: "Latest",
+      active: true,
+    };
+    extension.handlers.onMessage(JSON.stringify({ type: "tabs", tabs: [latestTab] }));
+    expect(bridge.accessibleTabs()).toEqual([latestTab]);
+
+    lookups.get("first.example.com")?.([{ address: "93.184.216.34", family: 4 }]);
+    await flush();
+    extension.handlers.onMessage(JSON.stringify({ type: "tabs", tabs: [latestTab] }));
+    expect(bridge.accessibleTabs()).toEqual([latestTab]);
+    bridge.dispose();
+  });
+
+  it("creates no technical tabs across five healthy CDP identity cycles", async () => {
+    const bridge = new ExtensionRelayBridge();
+    const extension = wireExtension(bridge);
+    sendHello(extension.handlers);
+
+    for (let id = 1; id <= 5; id += 1) {
+      const client = new FakeSocket();
+      const cdp = bridge.attachCdpClientSocket(client);
+      cdp.onMessage(JSON.stringify({ id, method: "Browser.getVersion" }));
+      await flush();
+      expect(client.frames().find((frame) => frame.id === id)?.result).toBeTruthy();
+      cdp.onClose();
+    }
+
+    expect(extension.socket.frames()).not.toContainEqual(
+      expect.objectContaining({ type: "createTab" }),
+    );
+    bridge.dispose();
+  });
   it("notifies connection waiters only after an authenticated valid hello", async () => {
     vi.useFakeTimers();
     const bridge = new ExtensionRelayBridge();
@@ -434,146 +639,6 @@ describe("ExtensionRelayBridge", () => {
     await flush();
     expect(client.frames().find((frame) => frame.id === 5)?.result).toEqual({});
   });
-
-  it("creates a tab inside the group and returns its synthetic target", async () => {
-    const bridge = new ExtensionRelayBridge();
-    const { socket, handlers } = wireExtension(bridge);
-    sendHello(handlers);
-
-    const client = new FakeSocket();
-    const cdp = bridge.attachCdpClientSocket(client);
-    cdp.onMessage(
-      JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: { autoAttach: true } }),
-    );
-    await flush();
-    cdp.onMessage(
-      JSON.stringify({ id: 2, method: "Target.createTarget", params: { url: "https://new.test" } }),
-    );
-    await flush();
-
-    const response = client.frames().find((frame) => frame.id === 2);
-    expect(response?.result).toMatchObject({ targetId: "target-999" });
-    expect(socket.frames().find((frame) => frame.type === "createTab")).toMatchObject({
-      url: "https://new.test",
-      background: true,
-      focus: false,
-    });
-  });
-
-  it("bootstraps about:blank through an accessible document before attaching", async () => {
-    const bridge = new ExtensionRelayBridge();
-    const { socket, handlers } = wireExtension(bridge, { syncCreatedTab: false });
-    sendHello(handlers);
-
-    const client = new FakeSocket();
-    const cdp = bridge.attachCdpClientSocket(client);
-    cdp.onMessage(
-      JSON.stringify({ id: 1, method: "Target.createTarget", params: { url: "about:blank" } }),
-    );
-    await flush();
-
-    expect(socket.frames()).toContainEqual(
-      expect.objectContaining({ type: "createTab", url: "data:text/html," }),
-    );
-    expect(socket.frames()).not.toContainEqual(
-      expect.objectContaining({ type: "attach", tabId: 999 }),
-    );
-    expect(client.frames()).not.toContainEqual(expect.objectContaining({ id: 1 }));
-
-    handlers.onMessage(
-      JSON.stringify({
-        type: "tabs",
-        tabs: [...defaultTabs(), { tabId: 999, url: "data:text/html,", title: "", active: false }],
-      }),
-    );
-    await flush();
-
-    expect(socket.frames()).toContainEqual(expect.objectContaining({ type: "attach", tabId: 999 }));
-    expect(client.frames()).toContainEqual({ id: 1, result: { targetId: "target-999" } });
-    bridge.dispose();
-  });
-
-  it("does not finish tab creation through a replacement extension", async () => {
-    const bridge = new ExtensionRelayBridge();
-    const initial = wireExtension(bridge, { syncCreatedTab: false });
-    sendHello(initial.handlers);
-
-    const client = new FakeSocket();
-    const cdp = bridge.attachCdpClientSocket(client);
-    cdp.onMessage(
-      JSON.stringify({ id: 1, method: "Target.createTarget", params: { url: "https://new.test" } }),
-    );
-    await flush();
-
-    const replacement = wireExtension(bridge);
-    sendHello(replacement.handlers, [
-      { tabId: 999, url: "https://replacement.test", title: "", active: true },
-    ]);
-    await flush();
-
-    expect(client.frames().find((frame) => frame.id === 1)).toMatchObject({
-      error: { message: "extension disconnected while creating tab" },
-    });
-    expect(replacement.socket.frames()).not.toContainEqual(
-      expect.objectContaining({ type: "attach", tabId: 999 }),
-    );
-    bridge.dispose();
-  });
-
-  it("preserves an explicit foreground Target.createTarget request", async () => {
-    const bridge = new ExtensionRelayBridge();
-    const { socket, handlers } = wireExtension(bridge);
-    sendHello(handlers);
-
-    const client = new FakeSocket();
-    const cdp = bridge.attachCdpClientSocket(client);
-    cdp.onMessage(
-      JSON.stringify({
-        id: 1,
-        method: "Target.createTarget",
-        params: { url: "https://foreground.test", background: false },
-      }),
-    );
-    await flush();
-
-    expect(client.frames().find((frame) => frame.id === 1)?.result).toMatchObject({
-      targetId: "target-999",
-    });
-    expect(socket.frames().find((frame) => frame.type === "createTab")).toMatchObject({
-      url: "https://foreground.test",
-      background: false,
-      focus: true,
-    });
-  });
-
-  it.each([true, false])(
-    "honors an explicit Target.createTarget focus=%s request",
-    async (focus) => {
-      const bridge = new ExtensionRelayBridge();
-      const { socket, handlers } = wireExtension(bridge);
-      sendHello(handlers);
-
-      const client = new FakeSocket();
-      const cdp = bridge.attachCdpClientSocket(client);
-      cdp.onMessage(
-        JSON.stringify({
-          id: 1,
-          method: "Target.createTarget",
-          params: { url: "https://focused.test", focus },
-        }),
-      );
-      await flush();
-
-      expect(client.frames().find((frame) => frame.id === 1)?.result).toMatchObject({
-        targetId: "target-999",
-      });
-      expect(socket.frames().find((frame) => frame.type === "createTab")).toMatchObject({
-        url: "https://focused.test",
-        background: false,
-        focus,
-      });
-    },
-  );
 
   it("emits Target.detachedFromTarget when a tab becomes unavailable", async () => {
     const bridge = new ExtensionRelayBridge();
@@ -1041,7 +1106,7 @@ describe("ExtensionRelayBridge", () => {
     const bridge = new ExtensionRelayBridge();
     try {
       const original = wireExtension(bridge);
-      sendHello(original.handlers);
+      sendHello(original.handlers, defaultTabs(), "extension-instance-original");
       const cdp = bridge.attachCdpClientSocket(new FakeSocket());
       cdp.onMessage(
         JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: { autoAttach: true } }),
@@ -1050,11 +1115,15 @@ describe("ExtensionRelayBridge", () => {
       const resolveTarget = bridge.captureOperationTarget("target-1");
 
       const replacement = wireExtension(bridge);
-      sendHello(replacement.handlers);
+      sendHello(replacement.handlers, defaultTabs(), "extension-instance-replacement");
       await flush();
 
       expect(resolveTarget?.()).toBeUndefined();
       expect(bridge.captureOperationTarget("target-1")?.()).toBe("target-1");
+      expect(original.socket.frames()).toContainEqual({
+        type: "revokeTasks",
+        reason: "extension-replaced",
+      });
     } finally {
       bridge.dispose();
     }

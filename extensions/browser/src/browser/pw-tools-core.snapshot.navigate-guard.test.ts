@@ -88,6 +88,32 @@ describe("pw-tools-core.snapshot navigate guard", () => {
     expect(result.url).toBe("https://example.com");
   });
 
+  it("carries hostname policy through dispatch and the committed-URL check", async () => {
+    const page = {
+      goto: vi.fn(async () => {}),
+      url: vi.fn(() => "https://example.com"),
+    };
+    const navigationPolicy = {
+      version: 1 as const,
+      allow: [{ kind: "exact" as const, hostname: "example.com" }],
+      deny: [],
+    };
+    setPwToolsCoreCurrentPage(page);
+
+    await mod.navigateViaPlaywright({
+      cdpUrl: "http://127.0.0.1:18792",
+      url: "https://example.com",
+      navigationPolicy,
+    });
+
+    expect(getPwToolsCoreSessionMocks().gotoPageWithNavigationGuard).toHaveBeenCalledWith(
+      expect.objectContaining({ navigationPolicy }),
+    );
+    expect(getPwToolsCoreSessionMocks().assertPageNavigationCompletedSafely).toHaveBeenCalledWith(
+      expect.objectContaining({ navigationPolicy }),
+    );
+  });
+
   it.each([
     { requestedTimeoutMs: undefined, expectedTimeoutMs: 20_000 },
     { requestedTimeoutMs: 180_000, expectedTimeoutMs: 120_000 },

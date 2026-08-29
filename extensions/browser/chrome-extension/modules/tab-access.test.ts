@@ -25,6 +25,7 @@ function storageArea(seed: Record<string, unknown> = {}) {
 function createHarness({
   tabs,
   denied = [],
+  classifyNavigation,
 }: {
   tabs: Array<{
     id: number;
@@ -35,6 +36,11 @@ function createHarness({
     [key: string]: unknown;
   }>;
   denied?: unknown[];
+  classifyNavigation?: (
+    tab: Record<string, unknown>,
+  ) =>
+    | { status: "allowed" | "pending" | "denied" }
+    | Promise<{ status: "allowed" | "pending" | "denied" }>;
 }) {
   const session = storageArea({ deniedTabIdsV1: denied });
   const current = new Map(tabs.map((tab) => [tab.id, tab]));
@@ -54,6 +60,7 @@ function createHarness({
   const policy = createTabAccessPolicy({
     chromeApi,
     isSelectedTab: async (tab) => tab.groupId === 7,
+    classifyNavigation,
   });
   return { chromeApi, current, policy, session };
 }
@@ -177,6 +184,26 @@ describe("tab access policy", () => {
     harness.policy.setMode("selected");
     await expect(harness.policy.requireTab(1)).rejects.toThrow("restricted or unavailable");
     await expect(harness.policy.requireTab(2)).rejects.toThrow("incognito");
+  });
+
+  it("withholds inventory and attach authority when profile navigation policy denies a tab", async () => {
+    const classifyNavigation = vi.fn(async (tab: Record<string, unknown>) => ({
+      status: tab.url === "https://allowed.example" ? ("allowed" as const) : ("denied" as const),
+    }));
+    const harness = createHarness({
+      tabs: [
+        { id: 1, url: "https://allowed.example", groupId: 7 },
+        { id: 2, url: "https://denied.example", groupId: 7 },
+      ],
+      classifyNavigation,
+    });
+    await harness.policy.initialize("selected", true);
+
+    await expect(harness.policy.requireTab(1)).resolves.toMatchObject({ id: 1 });
+    await expect(harness.policy.requireTab(2)).rejects.toThrow("navigation policy");
+    await expect(harness.policy.listAccessibleTabs()).resolves.toEqual([
+      expect.objectContaining({ id: 1 }),
+    ]);
   });
 
   it("invalidates captured authority across mode and per-tab deny changes", async () => {

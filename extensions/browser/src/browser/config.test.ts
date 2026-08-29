@@ -801,6 +801,7 @@ describe("browser config", () => {
         headlessSource: "default",
         mcpArgs: undefined,
         mcpCommand: undefined,
+        compiledNavigationPolicy: { version: 1, allow: [], deny: [] },
         userDataDir: undefined,
       },
     },

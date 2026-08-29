@@ -17,6 +17,7 @@ import { BrowserTabNotFoundError } from "./errors.js";
 import {
   assertBrowserNavigationAllowed,
   assertBrowserNavigationResultAllowed,
+  hasBrowserNavigationPolicy,
   type BrowserNavigationPolicyOptions,
   withBrowserNavigationPolicy,
 } from "./navigation-guard.js";
@@ -171,22 +172,27 @@ export async function storeAriaSnapshotRefsViaPlaywright(opts: {
   });
 }
 
-async function prepareSnapshotPageViaPlaywright(opts: {
-  cdpUrl: string;
-  targetId?: string;
-  ssrfPolicy?: SsrFPolicy;
-}): Promise<Page> {
+async function prepareSnapshotPageViaPlaywright(
+  opts: {
+    cdpUrl: string;
+    targetId?: string;
+  } & BrowserNavigationPolicyOptions,
+): Promise<Page> {
   const page = await getPageForTargetId({
     cdpUrl: opts.cdpUrl,
     targetId: opts.targetId,
   });
   ensurePageState(page);
-  if (opts.ssrfPolicy) {
+  const navigationPolicy = withBrowserNavigationPolicy(opts.ssrfPolicy, {
+    navigationPolicy: opts.navigationPolicy,
+    browserProxyMode: opts.browserProxyMode,
+  });
+  if (hasBrowserNavigationPolicy(navigationPolicy)) {
     await assertPageNavigationCompletedSafely({
       cdpUrl: opts.cdpUrl,
       page,
       response: null,
-      ssrfPolicy: opts.ssrfPolicy,
+      ...navigationPolicy,
       targetId: opts.targetId,
     });
   }
@@ -194,18 +200,21 @@ async function prepareSnapshotPageViaPlaywright(opts: {
 }
 
 /** Captures a raw accessibility tree snapshot and stores matching role refs. */
-export async function snapshotAriaViaPlaywright(opts: {
-  cdpUrl: string;
-  targetId?: string;
-  limit?: number;
-  timeoutMs?: number;
-  ssrfPolicy?: SsrFPolicy;
-}): Promise<{ nodes: AriaSnapshotNode[] }> {
+export async function snapshotAriaViaPlaywright(
+  opts: {
+    cdpUrl: string;
+    targetId?: string;
+    limit?: number;
+    timeoutMs?: number;
+  } & BrowserNavigationPolicyOptions,
+): Promise<{ nodes: AriaSnapshotNode[] }> {
   const limit = resolveIntegerOption(opts.limit, 500, { min: 1, max: 2000 });
   const page = await prepareSnapshotPageViaPlaywright({
     cdpUrl: opts.cdpUrl,
     targetId: opts.targetId,
     ssrfPolicy: opts.ssrfPolicy,
+    navigationPolicy: opts.navigationPolicy,
+    browserProxyMode: opts.browserProxyMode,
   });
   const ariaTimeoutMs =
     typeof opts.timeoutMs === "number" && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0
@@ -252,15 +261,16 @@ export async function snapshotAriaViaPlaywright(opts: {
 }
 
 /** Captures Playwright's AI aria snapshot with optional URL appendix and truncation. */
-export async function snapshotAiViaPlaywright(opts: {
-  cdpUrl: string;
-  targetId?: string;
-  timeoutMs?: number;
-  maxChars?: number;
-  urls?: boolean;
-  ssrfPolicy?: SsrFPolicy;
-  delta?: { mode: RoleSnapshotIdentityMode; previousKeys?: ReadonlySet<string> };
-}): Promise<{
+export async function snapshotAiViaPlaywright(
+  opts: {
+    cdpUrl: string;
+    targetId?: string;
+    timeoutMs?: number;
+    maxChars?: number;
+    urls?: boolean;
+    delta?: { mode: RoleSnapshotIdentityMode; previousKeys?: ReadonlySet<string> };
+  } & BrowserNavigationPolicyOptions,
+): Promise<{
   snapshot: string;
   truncated?: boolean;
   refs: RoleRefMap;
@@ -270,6 +280,8 @@ export async function snapshotAiViaPlaywright(opts: {
     cdpUrl: opts.cdpUrl,
     targetId: opts.targetId,
     ssrfPolicy: opts.ssrfPolicy,
+    navigationPolicy: opts.navigationPolicy,
+    browserProxyMode: opts.browserProxyMode,
   });
 
   return await withSnapshotFrameGuard({
@@ -374,19 +386,20 @@ async function finalizeRoleSnapshotViaPlaywright(params: {
 }
 
 /** Captures a role-ref snapshot used by model-facing browser interaction tools. */
-export async function snapshotRoleViaPlaywright(opts: {
-  cdpUrl: string;
-  targetId?: string;
-  selector?: string;
-  frameSelector?: string;
-  refsMode?: "role" | "aria";
-  options?: RoleSnapshotOptions;
-  urls?: boolean;
-  maxChars?: number;
-  timeoutMs?: number;
-  ssrfPolicy?: SsrFPolicy;
-  delta?: { mode: RoleSnapshotIdentityMode; previousKeys?: ReadonlySet<string> };
-}): Promise<{
+export async function snapshotRoleViaPlaywright(
+  opts: {
+    cdpUrl: string;
+    targetId?: string;
+    selector?: string;
+    frameSelector?: string;
+    refsMode?: "role" | "aria";
+    options?: RoleSnapshotOptions;
+    urls?: boolean;
+    maxChars?: number;
+    timeoutMs?: number;
+    delta?: { mode: RoleSnapshotIdentityMode; previousKeys?: ReadonlySet<string> };
+  } & BrowserNavigationPolicyOptions,
+): Promise<{
   snapshot: string;
   truncated?: boolean;
   refs: Record<string, { role: string; name?: string; nth?: number }>;
@@ -397,6 +410,8 @@ export async function snapshotRoleViaPlaywright(opts: {
     cdpUrl: opts.cdpUrl,
     targetId: opts.targetId,
     ssrfPolicy: opts.ssrfPolicy,
+    navigationPolicy: opts.navigationPolicy,
+    browserProxyMode: opts.browserProxyMode,
   });
 
   const ariaSnapshotTimeout = resolveSnapshotTimeoutMs(opts.timeoutMs);
@@ -483,6 +498,7 @@ export async function navigateViaPlaywright(opts: {
   timeoutMs?: number;
   ssrfPolicy?: SsrFPolicy;
   browserProxyMode?: BrowserNavigationPolicyOptions["browserProxyMode"];
+  navigationPolicy?: BrowserNavigationPolicyOptions["navigationPolicy"];
 }): Promise<{ url: string; targetId?: string; download?: BrowserDownloadResult }> {
   const isRetryableNavigateError = (err: unknown): boolean => {
     const msg =
@@ -502,6 +518,7 @@ export async function navigateViaPlaywright(opts: {
     throw new Error("url is required");
   }
   const navigationPolicy = withBrowserNavigationPolicy(opts.ssrfPolicy, {
+    navigationPolicy: opts.navigationPolicy,
     browserProxyMode: opts.browserProxyMode,
   });
   await assertBrowserNavigationAllowed({
@@ -518,8 +535,7 @@ export async function navigateViaPlaywright(opts: {
       page,
       url,
       timeoutMs: timeout,
-      ssrfPolicy: opts.ssrfPolicy,
-      browserProxyMode: opts.browserProxyMode,
+      ...navigationPolicy,
       targetId: currentTargetId,
       ...(opts.resolveOperationTarget
         ? {
@@ -615,8 +631,7 @@ export async function navigateViaPlaywright(opts: {
         cdpUrl: opts.cdpUrl,
         page,
         response: navigationResult.response,
-        ssrfPolicy: opts.ssrfPolicy,
-        browserProxyMode: opts.browserProxyMode,
+        ...navigationPolicy,
         targetId: currentTargetId,
       });
     }

@@ -12,7 +12,7 @@
   - [02 - Decide the browser domain-policy seam](tickets/done/02-decide-browser-domain-policy-seam.md)
   - [03 - Implement extension-profile launch and readiness](tickets/done/03-implement-extension-profile-launch-and-readiness.md)
   - [04 - Implement descendant popup containment](tickets/done/04-implement-descendant-popup-containment.md)
-  - [05 - Enforce task-owned lifecycle and domain policy](tickets/05-enforce-task-owned-lifecycle-and-domain-policy.md)
+  - [05 - Enforce task-owned lifecycle and domain policy](tickets/done/05-enforce-task-owned-lifecycle-and-domain-policy.md)
   - [06 - Prove the packaged flow in isolation](tickets/06-prove-packaged-flow-in-isolation.md)
   - [07 - Provision the Windows restart lane](tickets/07-provision-windows-restart-lane.md)
   - [08 - Accept the candidate on personal Chrome](tickets/08-accept-candidate-on-personal-chrome.md)

@@ -1,8 +1,10 @@
+import { classifyDescendantNavigation as classifyLocalDescendantNavigation } from "./modules/descendant-tab-containment.js";
 import {
   createNativeBootstrapController,
   discardRetiredCopilotState,
   prepareRetiredCopilotState,
 } from "./modules/native-bootstrap.js";
+import { createNavigationPolicyController } from "./modules/navigation-policy-controller.js";
 import { createPopupMessageHandler } from "./modules/popup-background.js";
 import { createRelayCommandHandler } from "./modules/relay-command-handler.js";
 import { openAuthenticatedRelaySocket } from "./modules/relay-connection.js";
@@ -23,6 +25,7 @@ import {
 import { findOpenClawGroups, isTabSelected } from "./modules/relay-tab-groups.js";
 import { registerTabAccessEvents } from "./modules/tab-access-events.js";
 import { createTabAccessPolicy } from "./modules/tab-access.js";
+import { createTaskTabLifecycle } from "./modules/task-tab-lifecycle.js";
 
 const BADGE = {
   off: { text: "", color: "#000000" },
@@ -33,6 +36,7 @@ const BADGE = {
 const RELAY_WATCHDOG_ALARM = "openclaw-relay-watchdog";
 const RELAY_OPENING_DEADLINE_ALARM = "openclaw-relay-opening-deadline";
 const RELAY_AUTH_TIMEOUT_MS = 10_000;
+const EXTENSION_INSTANCE_ID = crypto.randomUUID();
 
 /** @type {WebSocket|null} */
 let relayWs = null;
@@ -46,6 +50,8 @@ let relayStatusHint = "";
 let reconciledPairingInvalidationRevision = 0;
 let relayConnectionGeneration = 0;
 let relayConnectionsSuspended = false;
+let legacyHelloTimer = null;
+const taskTabs = createTaskTabLifecycle();
 let nativeBootstrap = null;
 // Start blocked: no runtime path may outrun the retired-state storage read.
 let retiredCopilotCustodyBlocked = true;
@@ -63,7 +69,23 @@ const utilityWorldNames = new Map();
 let tabsSyncTimer = null;
 let accessMutationChain = Promise.resolve();
 const pairingConfigStore = createPairingConfigStore(chrome.storage.local);
-const tabAccessPolicy = createTabAccessPolicy({ isSelectedTab: isTabSelected });
+const navigationPolicyController = createNavigationPolicyController({
+  timeoutMs: RELAY_AUTH_TIMEOUT_MS,
+  isRelayAuthenticated: () =>
+    relayAuthenticatedSocket === relayWs && relayWs?.readyState === WebSocket.OPEN,
+  send,
+  taskTabs,
+  invalidateAccess: () => tabAccessPolicy.invalidateAll(),
+  onPolicyInstalled: async (nonce) => {
+    await detachAllDebuggerSessions();
+    await sendHello({ nonce, withInventory: false });
+    await syncTabsToRelay();
+  },
+});
+const tabAccessPolicy = createTabAccessPolicy({
+  isSelectedTab: isTabSelected,
+  classifyNavigation: navigationPolicyController.classifyTab,
+});
 const tabAccessReady = (async () => {
   const retiredState = await prepareRetiredCopilotState();
   retiredCopilotCustodyBlocked = retiredState.blocked;
@@ -103,6 +125,21 @@ function closeRelaySocket() {
   socket.close();
 }
 
+function clearNavigationPolicy() {
+  navigationPolicyController.clear();
+  if (legacyHelloTimer) {
+    clearTimeout(legacyHelloTimer);
+    legacyHelloTimer = null;
+  }
+}
+
+async function classifyContainedDescendantNavigation(tab) {
+  if (!navigationPolicyController.hasInstalledPolicy()) {
+    return classifyLocalDescendantNavigation(tab);
+  }
+  return (await navigationPolicyController.classifyTab(tab)).status;
+}
+
 function suspendRelayConnections() {
   relayConnectionsSuspended = true;
   relayConnectionGeneration += 1;
@@ -118,6 +155,7 @@ async function reconcilePairingInvalidation() {
     return;
   }
   reconciledPairingInvalidationRevision = pairingConfigStore.invalidationRevision;
+  taskTabs.revokeAll();
   await syncTabsToRelay();
   closeRelaySocket();
   setBadge("off");
@@ -211,7 +249,10 @@ async function syncTabsToRelay() {
       void detachDebugger(tabId);
     }
   }
-  send({ type: "tabs", tabs: accessible.map(toRelayTabInfo) });
+  send({
+    type: "tabs",
+    tabs: accessible.map((tab) => toRelayTabInfo(tab, taskTabs.generationFor(tab.id))),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +327,32 @@ async function attachDebugger(tabId) {
   } finally {
     attachingTabs.delete(tabId);
   }
+}
+
+async function attachCreatedDebugger(tabId, taskGeneration) {
+  if (!taskTabs.owns(tabId, taskGeneration)) {
+    throw new Error(`task ownership for tab ${tabId} is no longer current`);
+  }
+  try {
+    await chrome.debugger.attach({ tabId }, "1.3");
+  } catch (error) {
+    if (!String(error?.message ?? error).includes("Another debugger is already attached")) {
+      throw error;
+    }
+  }
+  if (!taskTabs.owns(tabId, taskGeneration)) {
+    await chrome.debugger.detach({ tabId }).catch(() => undefined);
+    throw new Error(`task ownership for tab ${tabId} was revoked during attach`);
+  }
+  const targets = await chrome.debugger.getTargets();
+  if (!taskTabs.owns(tabId, taskGeneration)) {
+    await chrome.debugger.detach({ tabId }).catch(() => undefined);
+    throw new Error(`task ownership for tab ${tabId} was revoked during target discovery`);
+  }
+  attachedTabs.add(tabId);
+  attachmentTokens.set(tabId, Symbol("task debugger attachment"));
+  const target = targets.find((candidate) => candidate.tabId === tabId && candidate.attached);
+  return { targetId: target?.id ?? `tab-${tabId}` };
 }
 
 async function detachDebugger(tabId) {
@@ -372,6 +439,7 @@ async function pauseTab(tabId) {
   }
   await Promise.allSettled([attachingTabs.get(tabId)]);
   await detachDebugger(tabId);
+  taskTabs.revoke(tabId);
   await syncTabsToRelay();
   if (storageError) {
     throw storageError instanceof Error
@@ -440,17 +508,21 @@ const handleRelayCommand = createRelayCommandHandler({
     // proven root setup command is the session fact needed after navigation.
     utilityWorldNames.set(tabId, worldName);
   },
+  attachCreatedDebugger,
+  taskTabs,
 });
 
-async function sendHello() {
-  const accessible = await tabAccessPolicy.listAccessibleTabs();
+async function sendHello({ nonce, withInventory = true } = {}) {
+  const accessible = withInventory ? await tabAccessPolicy.listAccessibleTabs() : [];
   const uaMatch = /Chrom(?:e|ium)\/[\d.]+/.exec(navigator.userAgent);
   send({
     type: "hello",
     userAgent: navigator.userAgent,
     browserVersion: uaMatch ? uaMatch[0] : "Chrome/unknown",
     extensionVersion: chrome.runtime.getManifest().version,
-    tabs: accessible.map(toRelayTabInfo),
+    extensionInstanceId: EXTENSION_INSTANCE_ID,
+    ...(nonce ? { navigationPolicyNonce: nonce } : {}),
+    tabs: accessible.map((tab) => toRelayTabInfo(tab, taskTabs.generationFor(tab.id))),
   });
 }
 
@@ -504,10 +576,41 @@ async function connectRelay(isConnectionAllowed = () => true) {
         clearRelayOpeningDeadline();
         reconnectAttempt = 0;
         setBadge("on");
-        await sendHello();
+        clearNavigationPolicy();
+        await detachAllDebuggerSessions();
+        // Compatibility with an older relay is intentionally empty-policy only.
+        // A current relay installs its connection-bound policy before this fires.
+        legacyHelloTimer = setTimeout(() => {
+          legacyHelloTimer = null;
+          if (relayWs !== socket || navigationPolicyController.hasInstalledPolicy()) {
+            return;
+          }
+          navigationPolicyController.installLegacyEmptyPolicy();
+          void sendHello();
+        }, 250);
       },
       onApplicationMessage: (socket, msg) => {
-        void handleRelayCommand(msg);
+        if (msg?.type === "navigationPolicy.v1") {
+          if (legacyHelloTimer) {
+            clearTimeout(legacyHelloTimer);
+            legacyHelloTimer = null;
+          }
+          void navigationPolicyController
+            .installFrame(msg)
+            .catch(/** @param {unknown} error */ (error) => failRelayAuthentication(socket, error));
+          return;
+        }
+        if (msg?.type === "navigationDecision") {
+          navigationPolicyController.handleDecision(msg);
+          return;
+        }
+        if (msg?.type === "revokeTasks") {
+          void taskTabs.cleanupAll();
+          return;
+        }
+        if (navigationPolicyController.hasInstalledPolicy()) {
+          void handleRelayCommand(msg);
+        }
       },
       onAuthenticationFailure: (socket, error) => failRelayAuthentication(socket, error),
       onClose: (socket, authenticated) => {
@@ -522,6 +625,8 @@ async function connectRelay(isConnectionAllowed = () => true) {
           relayStatusHint =
             "Relay authentication v2 failed. Update OpenClaw, or re-pair after a relay key rotation.";
         }
+        clearNavigationPolicy();
+        void detachAllDebuggerSessions();
         setBadge("error");
         scheduleReconnect();
       },
@@ -662,6 +767,8 @@ registerTabAccessEvents({
   removeTabFromOpenClawGroup,
   placeTabInGroup: (tabId, groupId) => addTabToOpenClawGroup(tabId, groupId),
   runAccessMutation,
+  classifyDescendantNavigation: classifyContainedDescendantNavigation,
+  taskTabs,
   getUtilityWorldName: (tabId) => utilityWorldNames.get(tabId),
   forgetUtilityWorld: (tabId) => utilityWorldNames.delete(tabId),
 });
