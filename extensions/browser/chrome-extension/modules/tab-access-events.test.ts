@@ -232,6 +232,25 @@ describe("tab access event epochs", () => {
     expect(harness.attachedAccessEpochs.has(7)).toBe(false);
   });
 
+  it("keeps a hidden task registered while its earlier tab event is being inspected", async () => {
+    const harness = createHarness("selected");
+    const inspection = deferred<ReturnType<typeof accessState>>();
+    harness.attachedAccessEpochs.delete(7);
+    harness.setAccessible(false);
+    harness.setCurrentTabUrl("about:blank");
+    harness.policy.inspectTab.mockImplementationOnce(async () => await inspection.promise);
+
+    harness.tabsUpdatedListener(7, { url: "about:blank" });
+    await vi.waitFor(() => expect(harness.policy.inspectTab).toHaveBeenCalledOnce());
+    harness.setTaskGeneration("task-generation-7");
+    inspection.resolve(accessState(false));
+    await vi.waitFor(() =>
+      expect(harness.policy.epochIsCurrent.mock.calls.length).toBeGreaterThan(3),
+    );
+
+    expect(harness.detachDebugger).not.toHaveBeenCalled();
+  });
+
   it("keeps the exact task attachment while its first ordinary URL is still pending", async () => {
     const harness = createHarness("selected");
     harness.attachedAccessEpochs.delete(7);

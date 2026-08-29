@@ -208,6 +208,20 @@ export function registerTabAccessEvents({
     })().catch(() => undefined);
   });
 
+  const taskTabDefersReconciliation = async (tabId, eventIsCurrent) => {
+    const taskGeneration = taskTabs.generationFor?.(tabId);
+    if (!taskGeneration) {
+      return !eventIsCurrent();
+    }
+    const taskTab = await chromeApi.tabs.get(tabId).catch(() => null);
+    return (
+      !eventIsCurrent() ||
+      taskTabs.generationFor?.(tabId) !== taskGeneration ||
+      !taskTab ||
+      taskTab.url === "about:blank"
+    );
+  };
+
   chromeApi.tabs.onUpdated.addListener((tabId, changeInfo) => {
     scheduleTabsSync();
     const urlChanged = typeof changeInfo.url === "string";
@@ -224,17 +238,10 @@ export function registerTabAccessEvents({
       if (!eventIsCurrent()) {
         return;
       }
-      const taskGeneration = taskTabs.generationFor?.(tabId);
-      if (taskGeneration) {
-        const taskTab = await chromeApi.tabs.get(tabId).catch(() => null);
-        if (!eventIsCurrent() || taskTabs.generationFor?.(tabId) !== taskGeneration || !taskTab) {
-          return;
-        }
-        // pendingUrl is only the destination: the exact task attachment must stay alive while
-        // about:blank is committed, or detaching here aborts the in-flight Page.navigate.
-        if (taskTab.url === "about:blank") {
-          return;
-        }
+      // pendingUrl is only the destination: the exact task attachment must stay alive while
+      // about:blank is committed, or detaching here aborts the in-flight Page.navigate.
+      if (await taskTabDefersReconciliation(tabId, eventIsCurrent)) {
+        return;
       }
       const state = await policy.inspectTab(tabId, eventEpoch);
       if (!eventIsCurrent()) {
@@ -246,6 +253,11 @@ export function registerTabAccessEvents({
         }
         await Promise.allSettled([attachingTabs.get(tabId)]);
         if (!eventIsCurrent()) {
+          return;
+        }
+        // tabs.create() can register task ownership while the policy inspection
+        // above is pending. Recheck at the final detach boundary.
+        if (await taskTabDefersReconciliation(tabId, eventIsCurrent)) {
           return;
         }
         await detachDebugger(tabId);
