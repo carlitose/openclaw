@@ -1,4 +1,5 @@
 const UTILITY_WORLD_PREFIX = "__playwright_utility_world_";
+const FONT_FAMILY_KEYS = "standard fixed serif sansSerif cursive fantasy math".split(" ");
 
 function hasExactKeys(value, keys) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -21,6 +22,40 @@ function isUtilityWorldName(value) {
   );
 }
 
+function isFontFamilies(value) {
+  const keys =
+    value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value) : [];
+  return (
+    keys.length > 0 &&
+    keys.length <= FONT_FAMILY_KEYS.length &&
+    keys.every(
+      (key) =>
+        FONT_FAMILY_KEYS.includes(key) &&
+        typeof value[key] === "string" &&
+        value[key].length > 0 &&
+        value[key].length <= 256,
+    )
+  );
+}
+
+function isFontFamilyBootstrap(params) {
+  return (
+    (hasExactKeys(params, ["fontFamilies"]) ||
+      hasExactKeys(params, ["fontFamilies", "forScripts"])) &&
+    isFontFamilies(params.fontFamilies) &&
+    (params.forScripts === undefined ||
+      (Array.isArray(params.forScripts) &&
+        params.forScripts.length <= 32 &&
+        params.forScripts.every(
+          (entry) =>
+            hasExactKeys(entry, ["script", "fontFamilies"]) &&
+            typeof entry.script === "string" &&
+            /^[a-z]{4}$/.test(entry.script) &&
+            isFontFamilies(entry.fontFamilies),
+        )))
+  );
+}
+
 /** Commands needed to initialize an unpublished empty page without reading or executing content. */
 export function isTaskBootstrapCdpCommand(method, params) {
   switch (method) {
@@ -36,6 +71,10 @@ export function isTaskBootstrapCdpCommand(method, params) {
       return hasExactKeys(params, ["enabled"]) && params.enabled === true;
     case "Page.setInterceptFileChooserDialog":
       return hasExactKeys(params, ["enabled"]) && typeof params.enabled === "boolean";
+    case "Page.setFontFamilies":
+      // Headless Playwright applies bounded platform font defaults before navigation.
+      // Keep that inert setup available without granting general Page-domain authority.
+      return isFontFamilyBootstrap(params);
     case "Page.addScriptToEvaluateOnNewDocument":
       return (
         hasExactKeys(params, ["source", "worldName"]) &&

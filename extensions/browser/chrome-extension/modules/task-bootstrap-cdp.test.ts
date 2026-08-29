@@ -25,6 +25,30 @@ describe("task bootstrap CDP contract", () => {
     ["Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }],
     ["Emulation.setFocusEmulationEnabled", { enabled: true }],
     [
+      "Page.setFontFamilies",
+      {
+        fontFamilies: {
+          standard: "Times New Roman",
+          fixed: "Consolas",
+          serif: "Times New Roman",
+          sansSerif: "Arial",
+          cursive: "Comic Sans MS",
+          fantasy: "Impact",
+        },
+        forScripts: [
+          {
+            script: "cyrl",
+            fontFamilies: {
+              standard: "Times New Roman",
+              fixed: "Courier New",
+              serif: "Times New Roman",
+              sansSerif: "Arial",
+            },
+          },
+        ],
+      },
+    ],
+    [
       "Emulation.setEmulatedMedia",
       {
         media: "",
@@ -49,6 +73,25 @@ describe("task bootstrap CDP contract", () => {
     ],
     ["Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }],
     ["Page.enable", { extra: true }],
+    ["Page.setFontFamilies", { fontFamilies: { systemUi: "Segoe UI" } }],
+    ["Page.setFontFamilies", { fontFamilies: { sansSerif: "x".repeat(257) } }],
+    [
+      "Page.setFontFamilies",
+      {
+        fontFamilies: { sansSerif: "Arial" },
+        forScripts: [{ script: "latin", fontFamilies: { sansSerif: "Arial" } }],
+      },
+    ],
+    [
+      "Page.setFontFamilies",
+      {
+        fontFamilies: { sansSerif: "Arial" },
+        forScripts: Array.from({ length: 33 }, () => ({
+          script: "latn",
+          fontFamilies: { sansSerif: "Arial" },
+        })),
+      },
+    ],
   ])("rejects %s outside the exact bootstrap contract", (method, params) => {
     expect(isTaskBootstrapCdpCommand(method, params)).toBe(false);
   });
