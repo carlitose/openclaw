@@ -4,7 +4,7 @@
 
 ## Navigation
 
-[[#Concepts]] · [[#Entities]] · [[#Sources]] · [[#Synthesis]] · [[#Timeline]]
+[[#Concepts]] · [[#Entities]] · [[#Sources]] · [[#Queries]] · [[#Synthesis]] · [[#Timeline]]
 
 ## Concepts
 
@@ -25,23 +25,20 @@
 - [[sources/artifact-ticket-personal-chrome-browser-control-02]] - completed navigation-policy decision.
 - [[sources/artifact-ticket-personal-chrome-browser-control-03]] - completed extension-profile launcher and readiness.
 - [[sources/artifact-ticket-personal-chrome-browser-control-04]] - completed descendant containment.
-- [[sources/artifact-ticket-personal-chrome-browser-control-05]] - open lifecycle and policy integration.
-- [[sources/artifact-ticket-personal-chrome-browser-control-06]] - open packaged isolation proof.
-- [[sources/artifact-ticket-personal-chrome-browser-control-07]] - human-gated Windows restart lane.
+- [[sources/artifact-ticket-personal-chrome-browser-control-05]] - integrated lifecycle and policy owner.
+- [[sources/artifact-ticket-personal-chrome-browser-control-06]] - active packaged isolation proof.
+- [[sources/artifact-ticket-personal-chrome-browser-control-07]] - human-gated restart lane.
 - [[sources/artifact-ticket-personal-chrome-browser-control-08]] - human-gated personal Chrome acceptance.
 - [[sources/path-docs-adrs-2026-08-27-browser-navigation-hostname-policy-md]] - accepted hostname-policy ADR.
+- [[sources/ticket-autopilot-personal-chrome-afk-05-06-main-v1-status]] - provider, budget, and verification status after PR 11.
 
 ## Queries
 
-No durable queries yet.
-
-## Comparisons
-
-No comparison pages yet.
+- [[queries/2026-08-28-where-ticket-work-stands]] - current integrated frontier, evidence, and gates.
 
 ## Synthesis
 
-- [[synthesis/implementation-frontier]] - integrated foundation, remaining AFK work, and human gates.
+- [[synthesis/implementation-frontier]] - five integrated tickets, Ticket 06 limits, and remaining human gates.
 
 ## Timeline
 
@@ -49,7 +46,7 @@ No comparison pages yet.
 
 ## Open Questions
 
-- Which owner refactor will let Ticket 05 absorb policy and cleanup without parallel runtime paths?
-- Which exact package candidate will Ticket 06 freeze after Ticket 05?
-- Which Windows virtualization product, if any, will be approved for Ticket 07?
+- Which lifecycle boundary still permits Chrome debugger detach after several successful packaged cycles?
+- What explicit budget or diagnostic authority will unblock Ticket 06?
+- Which restart environment, if any, will be approved for Ticket 07?
 - Which harmless destinations and live mutation boundary will be approved for Ticket 08?

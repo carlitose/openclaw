@@ -4,13 +4,13 @@ title: "Personal Chrome browser control"
 identity_key: artifact:wayfinder-personal-chrome-browser-control
 identity_strength: stable
 source_path: docs/internal/personal-chrome-browser-control/WAYFINDER.md
-source_digest: sha256:a5b2cc735ee2d41c86c48e101d1cab83926983ad1eacb22c5b0571c09ce93b8b
+source_digest: sha256:cb9876313096edbf9b5120c5caf71d5969d437e1c1d629f22aecd19b9aadf6bf
 source_status: present
 artefact_kind: spec
 disposition: not-applicable
 created: 2026-08-28
-updated: 2026-08-28
-created_provenance: mtime
+updated: 2026-08-29
+created_provenance: git-commit
 disposition_changed:
 disposition_changed_provenance: unknown
 ---

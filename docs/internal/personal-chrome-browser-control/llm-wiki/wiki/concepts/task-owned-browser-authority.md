@@ -2,7 +2,7 @@
 type: concept
 title: Task-owned browser authority
 created: 2026-08-28
-updated: 2026-08-28
+updated: 2026-08-29
 sources:
   [
     artifact-wayfinder-personal-chrome-browser-control,
@@ -62,8 +62,11 @@ Every requested action ends in one of three observable classes: success with a s
 handle, a typed boundary or policy failure with the next safe step, or a primary failure plus
 an explicit incomplete-cleanup outcome. Silent disappearance is not acceptable.
 
-Ticket 04 supplies creation-time descendant containment. Ticket 05 remains the integration
-owner for root creation, direct relay commands, navigation, lifecycle, and exact cleanup. See
+Ticket 04 supplied creation-time descendant containment. Ticket 05 integrated root creation,
+direct relay commands, navigation, lifecycle, revocation, and exact cleanup. Ticket 06 is now
+testing that owner boundary as a frozen packaged flow; its remaining debugger-detach defect
+does not transfer ownership to a downstream workaround
+[[sources/ticket-autopilot-personal-chrome-afk-05-06-main-v1-status]]. See
 [[concepts/descendant-popup-containment]] and [[synthesis/implementation-frontier]].
 
 ## Sources
@@ -71,3 +74,4 @@ owner for root creation, direct relay commands, navigation, lifecycle, and exact
 - [[sources/artifact-wayfinder-personal-chrome-browser-control]]
 - [[sources/artifact-ticket-personal-chrome-browser-control-04]]
 - [[sources/artifact-ticket-personal-chrome-browser-control-05]]
+- [[sources/ticket-autopilot-personal-chrome-afk-05-06-main-v1-status]]

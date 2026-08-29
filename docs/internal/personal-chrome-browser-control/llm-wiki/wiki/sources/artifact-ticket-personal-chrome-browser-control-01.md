@@ -4,13 +4,13 @@ title: "Build the conflict-free isolation harness"
 identity_key: artifact:ticket-personal-chrome-browser-control-01
 identity_strength: stable
 source_path: docs/internal/personal-chrome-browser-control/tickets/done/01-build-conflict-free-isolation-harness.md
-source_digest: sha256:25c03ff93c70857fa90be62d0701ca4bce5cc0912c3c87efbf820cd4b166e4f7
+source_digest: sha256:8349da20dfcc6352cc7a82a60a5feaad66c288c88905627676e21067bae0b454
 source_status: present
 artefact_kind: ticket
 disposition: completed
 created: 2026-08-28
-updated: 2026-08-28
-created_provenance: mtime
+updated: 2026-08-29
+created_provenance: git-commit
 disposition_changed:
 disposition_changed_provenance: unknown
 run_id: 54062c213ca9498f-fork-v2

@@ -4,13 +4,13 @@ title: "Implement descendant popup containment"
 identity_key: artifact:ticket-personal-chrome-browser-control-04
 identity_strength: stable
 source_path: docs/internal/personal-chrome-browser-control/tickets/done/04-implement-descendant-popup-containment.md
-source_digest: sha256:29f44ccf09977f7fa9a43956cfccfef336c4f7d43a70527505eba241aef307e2
+source_digest: sha256:eb9625bf80c771632550ed7dc67c79f7257532068775576cdd2a773d8540c009
 source_status: present
 artefact_kind: ticket
 disposition: completed
 created: 2026-08-28
-updated: 2026-08-28
-created_provenance: mtime
+updated: 2026-08-29
+created_provenance: git-commit
 disposition_changed:
 disposition_changed_provenance: unknown
 run_id: personal-chrome-ticket04-main-v3
