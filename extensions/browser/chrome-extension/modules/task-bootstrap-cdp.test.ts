@@ -60,6 +60,18 @@ describe("task bootstrap CDP contract", () => {
         ],
       },
     ],
+    [
+      "Emulation.setEmulatedMedia",
+      {
+        media: "",
+        features: [
+          { name: "prefers-color-scheme", value: "light" },
+          { name: "prefers-reduced-motion", value: "no-preference" },
+          { name: "forced-colors", value: "none" },
+          { name: "prefers-contrast", value: "no-preference" },
+        ],
+      },
+    ],
     ["Runtime.runIfWaitingForDebugger", undefined],
   ])("allows %s with its inert bootstrap parameters", (method, params) => {
     expect(isTaskBootstrapCdpCommand(method, params)).toBe(true);
@@ -75,6 +87,18 @@ describe("task bootstrap CDP contract", () => {
     ["Page.enable", { extra: true }],
     ["Page.setFontFamilies", { fontFamilies: { systemUi: "Segoe UI" } }],
     ["Page.setFontFamilies", { fontFamilies: { sansSerif: "x".repeat(257) } }],
+    [
+      "Emulation.setEmulatedMedia",
+      {
+        media: "",
+        features: [
+          { name: "prefers-color-scheme", value: "sepia" },
+          { name: "prefers-reduced-motion", value: "no-preference" },
+          { name: "forced-colors", value: "none" },
+          { name: "prefers-contrast", value: "no-preference" },
+        ],
+      },
+    ],
     [
       "Page.setFontFamilies",
       {

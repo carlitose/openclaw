@@ -1,5 +1,13 @@
 const UTILITY_WORLD_PREFIX = "__playwright_utility_world_";
 const FONT_FAMILY_KEYS = "standard fixed serif sansSerif cursive fantasy math".split(" ");
+// Playwright initializes media before navigation using these context-option enums.
+// Keep valid defaults bounded without granting arbitrary Emulation-domain authority.
+const MEDIA_FEATURES = [
+  ["prefers-color-scheme", ["", "light", "dark", "no-preference"]],
+  ["prefers-reduced-motion", ["", "reduce", "no-preference"]],
+  ["forced-colors", ["", "active", "none"]],
+  ["prefers-contrast", ["", "no-preference", "more", "less", "custom"]],
+];
 
 function hasExactKeys(value, keys) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -56,6 +64,22 @@ function isFontFamilyBootstrap(params) {
   );
 }
 
+function isEmulatedMediaBootstrap(params) {
+  const features = params?.features;
+  return (
+    hasExactKeys(params, ["media", "features"]) &&
+    params.media === "" &&
+    Array.isArray(features) &&
+    features.length === MEDIA_FEATURES.length &&
+    features.every(
+      (feature, index) =>
+        hasExactKeys(feature, ["name", "value"]) &&
+        feature.name === MEDIA_FEATURES[index][0] &&
+        MEDIA_FEATURES[index][1].includes(feature.value),
+    )
+  );
+}
+
 /** Commands needed to initialize an unpublished empty page without reading or executing content. */
 export function isTaskBootstrapCdpCommand(method, params) {
   switch (method) {
@@ -98,18 +122,7 @@ export function isTaskBootstrapCdpCommand(method, params) {
         params.flatten === true
       );
     case "Emulation.setEmulatedMedia":
-      return (
-        hasExactKeys(params, ["media", "features"]) &&
-        params.media === "" &&
-        Array.isArray(params.features) &&
-        JSON.stringify(params.features) ===
-          JSON.stringify([
-            { name: "prefers-color-scheme", value: "" },
-            { name: "prefers-reduced-motion", value: "" },
-            { name: "forced-colors", value: "" },
-            { name: "prefers-contrast", value: "" },
-          ])
-      );
+      return isEmulatedMediaBootstrap(params);
     default:
       return false;
   }
