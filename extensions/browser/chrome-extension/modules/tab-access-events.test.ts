@@ -36,6 +36,7 @@ function createHarness(
   let revision = 0;
   let accessible = true;
   let currentTabUrl = "https://two.example";
+  let currentTabPendingUrl: string | undefined;
   let taskGeneration: string | undefined;
   const attachedTabs = new Set([7]);
   const attachedAccessEpochs = new Map([[7, { revision: 0, tabRevision: 0 }]]);
@@ -113,6 +114,7 @@ function createHarness(
       get: vi.fn(async (tabId: number) => ({
         id: tabId,
         url: currentTabUrl,
+        ...(currentTabPendingUrl ? { pendingUrl: currentTabPendingUrl } : {}),
         groupId: tabId === 7 ? 23 : -1,
       })),
       onCreated: {
@@ -197,6 +199,9 @@ function createHarness(
     setCurrentTabUrl: (url: string) => {
       currentTabUrl = url;
     },
+    setCurrentTabPendingUrl: (url: string | undefined) => {
+      currentTabPendingUrl = url;
+    },
     setTaskGeneration: (generation: string | undefined) => {
       taskGeneration = generation;
     },
@@ -216,6 +221,23 @@ describe("tab access event epochs", () => {
     harness.setTaskGeneration("task-generation-7");
 
     harness.tabsUpdatedListener(7, { groupId: 23 });
+    await vi.waitFor(() => expect(harness.policy.epochIsCurrent).toHaveBeenCalled());
+    await Promise.resolve();
+
+    expect(harness.policy.inspectTab).not.toHaveBeenCalled();
+    expect(harness.detachDebugger).not.toHaveBeenCalled();
+    expect(harness.attachedAccessEpochs.has(7)).toBe(false);
+  });
+
+  it("keeps the exact task attachment while its first ordinary URL is still pending", async () => {
+    const harness = createHarness("selected");
+    harness.attachedAccessEpochs.delete(7);
+    harness.setAccessible(false);
+    harness.setCurrentTabUrl("about:blank");
+    harness.setCurrentTabPendingUrl("https://two.example");
+    harness.setTaskGeneration("task-generation-7");
+
+    harness.tabsUpdatedListener(7, { url: "https://two.example" });
     await vi.waitFor(() => expect(harness.policy.epochIsCurrent).toHaveBeenCalled());
     await Promise.resolve();
 

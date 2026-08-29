@@ -223,9 +223,9 @@ export function registerTabAccessEvents({
         if (!eventIsCurrent() || taskTabs.generationFor?.(tabId) !== taskGeneration || !taskTab) {
           return;
         }
-        // The exact task attachment stays hidden but alive while its inert page initializes.
-        // Any meaningful URL falls through to the normal policy proof before CDP events resume.
-        if (effectiveTabUrl(taskTab) === "about:blank") {
+        // pendingUrl is only the destination: the exact task attachment must stay alive while
+        // about:blank is committed, or detaching here aborts the in-flight Page.navigate.
+        if (taskTab.url === "about:blank") {
           return;
         }
       }
