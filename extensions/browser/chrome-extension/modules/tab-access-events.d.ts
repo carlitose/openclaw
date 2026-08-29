@@ -66,7 +66,7 @@ export function registerTabAccessEvents(options: {
   runAccessMutation(task: () => void | Promise<void>): Promise<void>;
   taskTabs?: Pick<
     TaskTabLifecycle,
-    "registerDescendant" | "generationFor" | "forget" | "replace" | "revoke"
+    "registerDescendant" | "generationFor" | "isInitializing" | "forget" | "replace" | "revoke"
   >;
   getUtilityWorldName(tabId: number): string | undefined;
   forgetUtilityWorld(tabId: number): void;

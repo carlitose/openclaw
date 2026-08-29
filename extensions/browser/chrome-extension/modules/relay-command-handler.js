@@ -30,7 +30,9 @@ export function createRelayCommandHandler({
           return;
         case "cdp": {
           const epoch = captureAccess(message.tabId);
-          const exactTask = taskTabs.owns(message.tabId, message.taskGeneration);
+          const exactTask =
+            taskTabs.isInitializing(message.tabId) &&
+            taskTabs.owns(message.tabId, message.taskGeneration);
           const taskCommand =
             exactTask &&
             (message.method === "Page.navigate" ||
@@ -109,6 +111,14 @@ export function createRelayCommandHandler({
           } else {
             send({ type: "result", seq, result: { cleanup } });
           }
+          return;
+        }
+        case "publishTask": {
+          if (!taskTabs.owns(message.tabId, message.taskGeneration)) {
+            throw new Error(`task ownership for tab ${message.tabId} is no longer current`);
+          }
+          taskTabs.publish(message.tabId);
+          send({ type: "result", seq, result: {} });
           return;
         }
         case "closeTab": {

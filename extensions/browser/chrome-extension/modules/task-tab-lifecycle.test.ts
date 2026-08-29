@@ -29,8 +29,12 @@ describe("task tab lifecycle", () => {
       newGeneration: () => "generation-1",
     });
     lifecycle.registerRoot(10);
+    expect(lifecycle.isInitializing(10)).toBe(true);
     expect(lifecycle.replace(20, 10)).toBe(true);
     expect(lifecycle.owns(20, "generation-1")).toBe(true);
+    expect(lifecycle.publish(10)).toBe(false);
+    expect(lifecycle.publish(20)).toBe(true);
+    expect(lifecycle.isInitializing(20)).toBe(false);
     lifecycle.revoke(20);
     expect(lifecycle.generationFor(20)).toBeUndefined();
   });

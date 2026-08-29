@@ -24,6 +24,7 @@ function replyFor(msg: RelayToExtensionMessage): ExtensionToRelayMessage | null 
     case "detach":
     case "activateTab":
     case "closeTab":
+    case "publishTask":
       return { type: "result", seq: msg.seq, result: {} };
     case "createTab":
       return {
@@ -61,7 +62,13 @@ function wireExtension(bridge: ExtensionRelayBridge, opts: { syncCreatedTab?: bo
               type: "tabs",
               tabs: [
                 ...defaultTabs(),
-                { tabId: 999, url: msg.url, title: "", active: !msg.background },
+                {
+                  tabId: 999,
+                  url: msg.url,
+                  title: "",
+                  active: !msg.background,
+                  taskGeneration: "task-generation-999",
+                },
               ],
             }),
           );
@@ -114,6 +121,13 @@ describe("ExtensionRelayBridge task tabs", () => {
       background: true,
       focus: false,
     });
+    expect(socket.frames()).toContainEqual(
+      expect.objectContaining({
+        type: "publishTask",
+        tabId: 999,
+        taskGeneration: "task-generation-999",
+      }),
+    );
   });
 
   it("keeps about:blank task bootstrap out of accessible inventory", async () => {
@@ -125,6 +139,11 @@ describe("ExtensionRelayBridge task tabs", () => {
     const cdp = bridge.attachCdpClientSocket(client);
     cdp.onMessage(
       JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: { autoAttach: true } }),
+    );
+    const otherClient = new FakeSocket();
+    const otherCdp = bridge.attachCdpClientSocket(otherClient);
+    otherCdp.onMessage(
+      JSON.stringify({ id: 10, method: "Target.setAutoAttach", params: { autoAttach: true } }),
     );
     await flush();
     cdp.onMessage(
@@ -154,11 +173,54 @@ describe("ExtensionRelayBridge task tabs", () => {
     }
     const sessionId = (attached.params as { sessionId?: string }).sessionId;
     expect(sessionId).toBeTruthy();
-    const otherClient = new FakeSocket();
-    const otherCdp = bridge.attachCdpClientSocket(otherClient);
+    cdp.onMessage(JSON.stringify({ id: 24, sessionId, method: "Target.getTargetInfo" }));
+    await flush();
+    expect(client.frames().find((frame) => frame.id === 24)?.result).toMatchObject({
+      targetInfo: { targetId: "target-999", type: "page", attached: true },
+    });
+    expect(socket.frames()).not.toContainEqual(
+      expect.objectContaining({ type: "cdp", method: "Target.getTargetInfo" }),
+    );
     otherCdp.onMessage(JSON.stringify({ id: 20, sessionId, method: "Page.enable" }));
     await flush();
     expect(otherClient.frames().find((frame) => frame.id === 20)?.error).toBeTruthy();
+
+    handlers.onMessage(
+      JSON.stringify({
+        type: "cdpEvent",
+        tabId: 999,
+        taskGeneration: "task-generation-999",
+        method: "Fetch.requestPaused",
+        params: { requestId: "request-999" },
+      }),
+    );
+    expect(client.frames()).toContainEqual({
+      sessionId,
+      method: "Fetch.requestPaused",
+      params: { requestId: "request-999" },
+    });
+    expect(otherClient.frames()).not.toContainEqual(
+      expect.objectContaining({ method: "Fetch.requestPaused" }),
+    );
+
+    cdp.onMessage(
+      JSON.stringify({
+        id: 23,
+        sessionId,
+        method: "Fetch.continueRequest",
+        params: { requestId: "request-999" },
+      }),
+    );
+    await flush();
+    expect(socket.frames()).toContainEqual(
+      expect.objectContaining({
+        type: "cdp",
+        tabId: 999,
+        method: "Fetch.continueRequest",
+        taskGeneration: "task-generation-999",
+      }),
+    );
+    expect(client.frames().find((frame) => frame.id === 23)?.result).toMatchObject({ ok: true });
 
     cdp.onMessage(
       JSON.stringify({

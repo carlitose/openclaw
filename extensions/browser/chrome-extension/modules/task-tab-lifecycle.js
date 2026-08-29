@@ -8,7 +8,7 @@ export function createTaskTabLifecycle({
 
   function registerRoot(tabId) {
     const generation = newGeneration();
-    const task = { generation, rootTabId: tabId };
+    const task = { generation, rootTabId: tabId, published: false };
     roots.set(generation, task);
     nodes.set(tabId, { generation, parentTabId: null });
     return generation;
@@ -29,6 +29,21 @@ export function createTaskTabLifecycle({
 
   function owns(tabId, generation) {
     return typeof generation === "string" && generationFor(tabId) === generation;
+  }
+
+  function isInitializing(tabId) {
+    const generation = generationFor(tabId);
+    return generation ? roots.get(generation)?.published === false : false;
+  }
+
+  function publish(tabId) {
+    const generation = generationFor(tabId);
+    const task = generation ? roots.get(generation) : undefined;
+    if (!task || task.rootTabId !== tabId || task.published) {
+      return false;
+    }
+    task.published = true;
+    return true;
   }
 
   function replace(addedTabId, removedTabId) {
@@ -162,6 +177,8 @@ export function createTaskTabLifecycle({
     registerDescendant,
     generationFor,
     owns,
+    isInitializing,
+    publish,
     replace,
     forget,
     revoke,

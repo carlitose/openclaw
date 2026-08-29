@@ -245,7 +245,9 @@ async function syncTabsToRelay() {
   const accessible = await tabAccessPolicy.listAccessibleTabs();
   const accessibleIds = new Set(accessible.map((tab) => tab.id));
   for (const tabId of attachedTabs) {
-    if (!accessibleIds.has(tabId)) {
+    // Task-owned attachments can be intentionally unpublished while about:blank
+    // navigates. Their exact lifecycle owner revokes them on denial or cleanup.
+    if (!accessibleIds.has(tabId) && !taskTabs.isInitializing(tabId)) {
       void detachDebugger(tabId);
     }
   }

@@ -124,29 +124,29 @@ human authorization.
 
 ### Present in current upstream source
 
-| Capability | Current owner | Evidence and consequence |
-| --- | --- | --- |
-| Signed-in Chrome extension profile | `src/config/types.browser.ts`, `extensions/browser/src/browser/config.ts` | Built-in profile `chrome` resolves to driver `extension`; it is attach-only and does not currently select or launch a Chrome profile. |
-| Root-tab creation | `extensions/browser/src/browser/extension-relay/relay-bridge.ts`, `extensions/browser/chrome-extension/modules/relay-command-handler.js` | `Target.createTarget` becomes relay command `createTab`; the extension calls `chrome.tabs.create`, groups the tab, and synchronizes inventory. |
-| Selected-tab access boundary | `extensions/browser/chrome-extension/modules/tab-access.js`, `tab-access-events.js`, `relay-tab-groups.js` | Selected mode derives access from the OpenClaw group; group changes invalidate access and detach revoked tabs. |
-| MV3 reconnect | `extensions/browser/chrome-extension/background.js` | Startup, install, and alarm handlers restart automation and reconnect the relay. |
-| Relay reattachment | `extensions/browser/src/browser/extension-relay/relay-bridge.ts` | Current main records lost attachment intent and reattaches unchanged accessible tabs after a validated extension reconnect. The older local reconnect commit is superseded by this stronger upstream implementation. |
-| Stable operation ownership | `extensions/browser/src/browser/extension-relay/relay-bridge.ts` and tests | Current main tracks tab generations across renderer replacement and invalidates captured ownership on revoke or a different extension connection. |
-| Navigation SSRF guard | `extensions/browser/src/browser/navigation-guard.ts`, `src/infra/net/ssrf.ts` | OpenClaw checks requested, redirect, and final URLs on its normal browser paths and blocks URL-embedded credentials. |
-| Isolated test-state helpers | `src/test-utils/openclaw-test-state.ts`, `test/helpers/openclaw-test-instance.ts` | The repository already has canonical temporary state/config/Gateway helpers; new tests must reuse them. |
-| Docker and browser fixtures | `scripts/e2e`, `scripts/docker/sandbox`, `docs/reference/test.md` | Docker can prove packaged Gateway, protocol, raw CDP, and fixture behavior with isolated state. It is not a faithful Windows personal-profile extension environment. |
+| Capability                         | Current owner                                                                                                                            | Evidence and consequence                                                                                                                                                                                             |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Signed-in Chrome extension profile | `src/config/types.browser.ts`, `extensions/browser/src/browser/config.ts`                                                                | Built-in profile `chrome` resolves to driver `extension`; it is attach-only and does not currently select or launch a Chrome profile.                                                                                |
+| Root-tab creation                  | `extensions/browser/src/browser/extension-relay/relay-bridge.ts`, `extensions/browser/chrome-extension/modules/relay-command-handler.js` | `Target.createTarget` becomes relay command `createTab`; the extension calls `chrome.tabs.create`, groups the tab, and synchronizes inventory.                                                                       |
+| Selected-tab access boundary       | `extensions/browser/chrome-extension/modules/tab-access.js`, `tab-access-events.js`, `relay-tab-groups.js`                               | Selected mode derives access from the OpenClaw group; group changes invalidate access and detach revoked tabs.                                                                                                       |
+| MV3 reconnect                      | `extensions/browser/chrome-extension/background.js`                                                                                      | Startup, install, and alarm handlers restart automation and reconnect the relay.                                                                                                                                     |
+| Relay reattachment                 | `extensions/browser/src/browser/extension-relay/relay-bridge.ts`                                                                         | Current main records lost attachment intent and reattaches unchanged accessible tabs after a validated extension reconnect. The older local reconnect commit is superseded by this stronger upstream implementation. |
+| Stable operation ownership         | `extensions/browser/src/browser/extension-relay/relay-bridge.ts` and tests                                                               | Current main tracks tab generations across renderer replacement and invalidates captured ownership on revoke or a different extension connection.                                                                    |
+| Navigation SSRF guard              | `extensions/browser/src/browser/navigation-guard.ts`, `src/infra/net/ssrf.ts`                                                            | OpenClaw checks requested, redirect, and final URLs on its normal browser paths and blocks URL-embedded credentials.                                                                                                 |
+| Isolated test-state helpers        | `src/test-utils/openclaw-test-state.ts`, `test/helpers/openclaw-test-instance.ts`                                                        | The repository already has canonical temporary state/config/Gateway helpers; new tests must reuse them.                                                                                                              |
+| Docker and browser fixtures        | `scripts/e2e`, `scripts/docker/sandbox`, `docs/reference/test.md`                                                                        | Docker can prove packaged Gateway, protocol, raw CDP, and fixture behavior with isolated state. It is not a faithful Windows personal-profile extension environment.                                                 |
 
 ### Proven historically, but not implemented by current upstream
 
-| Capability | Durable conclusion | Claim ceiling |
-| --- | --- | --- |
-| Popup ancestry | Chrome 151 exposed `openerTabId` on normal and popup-window children. | Browser-mechanics evidence, not current production behavior. |
-| Exact group inheritance | Grouping a popup with the opener's exact group ID moved it into the opener's normal window and cleared `openerTabId` afterward. | The opener relation must be captured before grouping. |
-| Least-privilege predicate | A local overlay accepted only descendants of a grouped opener and rejected unrelated tabs. | The brittle overlay patch is not the final implementation. |
-| Manual revoke | Creation-only inheritance did not re-add a manually ungrouped child. | Must be re-proved in the upstream module architecture and selected mode. |
-| Locked extension build | A local builder detected upstream drift and preserved its last known-good output. | Useful packaging evidence; the fork should implement source directly instead of keeping a text patcher. |
-| Personal-profile OAuth | An earlier composition reached an authenticated Hattrick page through a Google chooser. | Historical evidence only; current fork/package/host composition is unverified. |
-| Startup recovery | A Windows scheduled task once started Chrome and restored the relay in the interactive session. | It was host-specific and is not an upstream launcher contract. |
+| Capability                | Durable conclusion                                                                                                              | Claim ceiling                                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Popup ancestry            | Chrome 151 exposed `openerTabId` on normal and popup-window children.                                                           | Browser-mechanics evidence, not current production behavior.                                            |
+| Exact group inheritance   | Grouping a popup with the opener's exact group ID moved it into the opener's normal window and cleared `openerTabId` afterward. | The opener relation must be captured before grouping.                                                   |
+| Least-privilege predicate | A local overlay accepted only descendants of a grouped opener and rejected unrelated tabs.                                      | The brittle overlay patch is not the final implementation.                                              |
+| Manual revoke             | Creation-only inheritance did not re-add a manually ungrouped child.                                                            | Must be re-proved in the upstream module architecture and selected mode.                                |
+| Locked extension build    | A local builder detected upstream drift and preserved its last known-good output.                                               | Useful packaging evidence; the fork should implement source directly instead of keeping a text patcher. |
+| Personal-profile OAuth    | An earlier composition reached an authenticated Hattrick page through a Google chooser.                                         | Historical evidence only; current fork/package/host composition is unverified.                          |
+| Startup recovery          | A Windows scheduled task once started Chrome and restored the relay in the interactive session.                                 | It was host-specific and is not an upstream launcher contract.                                          |
 
 ### Not yet established
 
@@ -369,16 +369,16 @@ the candidate boundary is unchanged.
 
 The old docs are evidence, not active work. Their final disposition is:
 
-| Old area | Disposition in this map |
-| --- | --- |
-| Chrome 151 popup prototype and local overlay | Preserve conclusions; reimplement as current upstream source and tests in ticket `04`. |
-| Relay reconnect and stable target/operation identity | Already present on current upstream main; verify, do not port the old local patch. |
+| Old area                                                    | Disposition in this map                                                                                                   |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Chrome 151 popup prototype and local overlay                | Preserve conclusions; reimplement as current upstream source and tests in ticket `04`.                                    |
+| Relay reconnect and stable target/operation identity        | Already present on current upstream main; verify, do not port the old local patch.                                        |
 | Generic CLI root creation and transient technical-URL fixes | Preserve failure cases; replace installed core patches with upstream and address remaining lifecycle gaps in ticket `05`. |
-| Hattrick cron/browser instruction edits | Product consumer only; do not treat prompts as browser infrastructure. Revisit after the generic feature passes. |
-| Startup task and interactive logon work | Host-specific historical evidence; replace with generic launcher code plus VM/host acceptance tickets. |
-| Technical-tab leak and orphan cleanup | Preserve zero-growth and exact-provenance invariants in tickets `05` and `06`. |
-| Old restart/reboot tickets | Superseded by tickets `07` and `08` against the final fork candidate. |
-| Upstream PR research | No PR or publication is authorized. Development remains in the fork. |
+| Hattrick cron/browser instruction edits                     | Product consumer only; do not treat prompts as browser infrastructure. Revisit after the generic feature passes.          |
+| Startup task and interactive logon work                     | Host-specific historical evidence; replace with generic launcher code plus VM/host acceptance tickets.                    |
+| Technical-tab leak and orphan cleanup                       | Preserve zero-growth and exact-provenance invariants in tickets `05` and `06`.                                            |
+| Old restart/reboot tickets                                  | Superseded by tickets `07` and `08` against the final fork candidate.                                                     |
+| Upstream PR research                                        | No PR or publication is authorized. Development remains in the fork.                                                      |
 
 ## Host cleanup and restoration boundary
 

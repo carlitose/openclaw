@@ -45,6 +45,8 @@ type ExtensionTabsMessage = { type: "tabs"; tabs: RelayTabInfo[] };
 type ExtensionCdpEventMessage = {
   type: "cdpEvent";
   tabId: number;
+  /** Exact unpublished task generation; omitted for ordinary accessible-tab events. */
+  taskGeneration?: string;
   sessionId?: string;
   method: string;
   params?: unknown;
@@ -109,6 +111,8 @@ export type RelayCommandBody =
   | { type: "closeTab"; tabId: number }
   /** Close one exact task generation, descendants first. */
   | { type: "cleanupTask"; tabId: number; taskGeneration: string }
+  /** End unpublished bootstrap authority after the relay adopts the exact task tab. */
+  | { type: "publishTask"; tabId: number; taskGeneration: string }
   /** Focus an accessible tab (window + tab activation). Result: {}. */
   | { type: "activateTab"; tabId: number };
 
@@ -246,9 +250,24 @@ function isExtensionTabsMessage(msg: RelayFrame): msg is RelayFrame & ExtensionT
 }
 
 function isExtensionCdpEventMessage(msg: RelayFrame): msg is RelayFrame & ExtensionCdpEventMessage {
+  const keys = ["type", "tabId", "method"];
+  if (Object.hasOwn(msg, "taskGeneration")) {
+    keys.push("taskGeneration");
+  }
+  if (Object.hasOwn(msg, "sessionId")) {
+    keys.push("sessionId");
+  }
+  if (Object.hasOwn(msg, "params")) {
+    keys.push("params");
+  }
   return (
+    hasExactOwnKeys(msg, keys) &&
     msg.type === "cdpEvent" &&
     isNonNegativeSafeInteger(msg.tabId) &&
+    (msg.taskGeneration === undefined ||
+      (typeof msg.taskGeneration === "string" &&
+        msg.taskGeneration.length >= 16 &&
+        msg.taskGeneration.length <= 128)) &&
     (msg.sessionId === undefined || typeof msg.sessionId === "string") &&
     typeof msg.method === "string"
   );

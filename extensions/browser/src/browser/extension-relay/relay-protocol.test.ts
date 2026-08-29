@@ -29,6 +29,17 @@ describe("parseExtensionMessage", () => {
       parseExtensionMessage(JSON.stringify({ type: "cdpEvent", tabId: 1, method: "Page.load" })),
     ).toMatchObject({ type: "cdpEvent", tabId: 1 });
     expect(
+      parseExtensionMessage(
+        JSON.stringify({
+          type: "cdpEvent",
+          tabId: 1,
+          taskGeneration: "task-generation-1",
+          method: "Fetch.requestPaused",
+          params: { requestId: "request-1" },
+        }),
+      ),
+    ).toMatchObject({ type: "cdpEvent", tabId: 1, taskGeneration: "task-generation-1" });
+    expect(
       parseExtensionMessage(JSON.stringify({ type: "detached", tabId: 1, reason: "cancel" })),
     ).toMatchObject({ type: "detached", tabId: 1 });
     expect(
@@ -109,6 +120,8 @@ describe("parseExtensionMessage", () => {
       { type: "cdpEvent", tabId: 1.5, method: "Page.load" },
       { type: "cdpEvent", tabId: 1 },
       { type: "cdpEvent", tabId: 1, sessionId: 2, method: "Page.load" },
+      { type: "cdpEvent", tabId: 1, taskGeneration: "short", method: "Page.load" },
+      { type: "cdpEvent", tabId: 1, method: "Page.load", extra: true },
       // result/error: numeric seq correlates the pending command.
       { type: "result", seq: "3" },
       { type: "result", seq: -1 },

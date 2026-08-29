@@ -117,6 +117,30 @@ describe("relay authority rechecks", () => {
     );
   });
 
+  it("ends bootstrap authority only after the relay publishes the exact task", async () => {
+    const harness = createHarness();
+    const taskGeneration = harness.taskTabs.registerRoot(7);
+
+    await harness.handler({
+      type: "publishTask",
+      seq: 12,
+      tabId: 7,
+      taskGeneration,
+    });
+
+    expect(harness.taskTabs.isInitializing(7)).toBe(false);
+    expect(harness.send).toHaveBeenCalledWith({ type: "result", seq: 12, result: {} });
+
+    await harness.handler({
+      type: "cdp",
+      seq: 13,
+      tabId: 7,
+      method: "Page.enable",
+      taskGeneration,
+    });
+    expect(harness.requireAccessibleTab).toHaveBeenCalledTimes(2);
+  });
+
   it("does not turn task ownership into general CDP authority", async () => {
     const harness = createHarness();
     const taskGeneration = harness.taskTabs.registerRoot(7);

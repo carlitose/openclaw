@@ -24,6 +24,8 @@ import { relayTestKey } from "./relay-key.test-support.js";
 
 declare const chrome: {
   runtime: { sendMessage: (message: unknown) => Promise<Record<string, unknown>> };
+  tabs: { query: (queryInfo: Record<string, unknown>) => Promise<unknown[]> };
+  debugger: { getTargets: () => Promise<unknown[]> };
 };
 
 const runE2E =
@@ -208,10 +210,14 @@ describe.runIf(runE2E)("Chrome native bootstrap Chromium E2E", () => {
           nativeHostPath,
         };
         const gatewayServer = http.createServer((req, res) => {
-          if (req.url === "/browser-owner-proof" || req.url === "/navigation-proof") {
+          if (
+            req.url === "/browser-owner-proof" ||
+            req.url === "/navigation-proof" ||
+            req.url === "/task-open-proof"
+          ) {
             res.writeHead(200, { "content-type": "text/html" });
             res.end(
-              '<title>OpenClaw E2E</title><style>body{margin:0}#spacer{height:2200px}#target{display:block;width:240px;height:96px;background:#1457d9;color:white;border:0;font:20px sans-serif}</style><div id="spacer"></div><button id="target">Offscreen target</button>',
+              `<title>${req.url === "/task-open-proof" ? "Task Open Proof" : "OpenClaw E2E"}</title><style>body{margin:0}#spacer{height:2200px}#target{display:block;width:240px;height:96px;background:#1457d9;color:white;border:0;font:20px sans-serif}</style><div id="spacer"></div><button id="target">Offscreen target</button>`,
             );
             return;
           }
@@ -494,6 +500,25 @@ describe.runIf(runE2E)("Chrome native bootstrap Chromium E2E", () => {
         }, screenshotDataUrl);
         expect(orangePixels).toBeGreaterThan(20);
         process.stderr.write(`[browser-extension-e2e] screenshot proof ${proofPath}\n`);
+
+        const taskOpenUrl = `http://127.0.0.1:${gatewayPort}/task-open-proof`;
+        const taskOpenResponse = await dispatcher.dispatch({
+          method: "POST",
+          path: "/tabs/open",
+          query: { profile: "e2e" },
+          body: { url: taskOpenUrl },
+        });
+        if (taskOpenResponse.status !== 200) {
+          const taskDiagnostics = await extensionPage.evaluate(async () => ({
+            tabs: await chrome.tabs.query({}),
+            debuggerTargets: await chrome.debugger.getTargets(),
+          }));
+          throw new Error(
+            `Relay task tab open failed: ${JSON.stringify({ response: taskOpenResponse, taskDiagnostics })}`,
+          );
+        }
+        expect(taskOpenResponse.body).toMatchObject({ url: taskOpenUrl });
+        process.stderr.write("[browser-extension-e2e] relay task tab opened and navigated\n");
 
         const distractingPage = await context.newPage();
         const distractingUrl = `http://127.0.0.1:${gatewayPort}/unrelated`;

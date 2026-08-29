@@ -92,6 +92,39 @@ function isRequestInterceptionBootstrap(params) {
   );
 }
 
+function isInterceptionRequestId(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= 256;
+}
+
+function isRequestInterceptionContinuation(method, params) {
+  if (method === "Fetch.continueRequest") {
+    return hasExactKeys(params, ["requestId"]) && isInterceptionRequestId(params.requestId);
+  }
+  if (method === "Fetch.failRequest") {
+    return (
+      hasExactKeys(params, ["requestId", "errorReason"]) &&
+      isInterceptionRequestId(params.requestId) &&
+      params.errorReason === "Failed"
+    );
+  }
+  return (
+    method === "Fetch.fulfillRequest" &&
+    hasExactKeys(params, [
+      "requestId",
+      "responseCode",
+      "responsePhrase",
+      "responseHeaders",
+      "body",
+    ]) &&
+    isInterceptionRequestId(params.requestId) &&
+    params.responseCode === 204 &&
+    params.responsePhrase === "No Content" &&
+    Array.isArray(params.responseHeaders) &&
+    params.responseHeaders.length === 0 &&
+    params.body === ""
+  );
+}
+
 /** Commands needed to initialize an unpublished empty page without reading or executing content. */
 export function isTaskBootstrapCdpCommand(method, params) {
   switch (method) {
@@ -137,10 +170,18 @@ export function isTaskBootstrapCdpCommand(method, params) {
       return isEmulatedMediaBootstrap(params);
     case "Network.setCacheDisabled":
       // Playwright installs its request guard before the first URL. Exact task/client
-      // ownership keeps this inert setup on the hidden tab; rejecting it dead-ends navigation.
-      return hasExactKeys(params, ["cacheDisabled"]) && params.cacheDisabled === true;
+      // ownership keeps setup and teardown on the hidden tab; both values are inert.
+      return hasExactKeys(params, ["cacheDisabled"]) && typeof params.cacheDisabled === "boolean";
     case "Fetch.enable":
       return isRequestInterceptionBootstrap(params);
+    case "Fetch.disable":
+      return hasNoParams(params);
+    case "Fetch.continueRequest":
+    case "Fetch.failRequest":
+    case "Fetch.fulfillRequest":
+      // Only resolve a request paused by the exact bootstrap guard. Overrides and
+      // arbitrary synthetic responses remain unavailable before publication.
+      return isRequestInterceptionContinuation(method, params);
     default:
       return false;
   }

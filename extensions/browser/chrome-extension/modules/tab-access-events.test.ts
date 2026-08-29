@@ -163,6 +163,7 @@ function createHarness(
     taskTabs: {
       registerDescendant: vi.fn(() => null),
       generationFor: vi.fn(() => taskGeneration),
+      isInitializing: vi.fn(() => taskGeneration !== undefined),
       forget: vi.fn(),
       replace: vi.fn(() => false),
       revoke: vi.fn(),
@@ -244,6 +245,24 @@ describe("tab access event epochs", () => {
     expect(harness.policy.inspectTab).not.toHaveBeenCalled();
     expect(harness.detachDebugger).not.toHaveBeenCalled();
     expect(harness.attachedAccessEpochs.has(7)).toBe(false);
+  });
+
+  it("forwards bootstrap events with the exact initializing task generation", () => {
+    const harness = createHarness("selected");
+    harness.attachedAccessEpochs.delete(7);
+    harness.setTaskGeneration("task-generation-7");
+
+    harness.debuggerEventListener({ tabId: 7 }, "Fetch.requestPaused", {
+      requestId: "request-7",
+    });
+
+    expect(harness.send).toHaveBeenCalledWith({
+      type: "cdpEvent",
+      tabId: 7,
+      taskGeneration: "task-generation-7",
+      method: "Fetch.requestPaused",
+      params: { requestId: "request-7" },
+    });
   });
 
   it("waits for stored access mode before handling Chrome's cancel revocation", async () => {

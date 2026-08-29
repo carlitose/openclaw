@@ -11,6 +11,8 @@ export type TaskTabLifecycle = {
   registerDescendant(openerTabId: number, tabId: number): string | null;
   generationFor(tabId: number): string | undefined;
   owns(tabId: number, generation: unknown): boolean;
+  isInitializing(tabId: number): boolean;
+  publish(tabId: number): boolean;
   replace(addedTabId: number, removedTabId: number): boolean;
   forget(tabId: number): void;
   revoke(tabId: number): void;

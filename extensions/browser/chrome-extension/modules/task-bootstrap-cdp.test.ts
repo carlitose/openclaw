@@ -73,11 +73,25 @@ describe("task bootstrap CDP contract", () => {
       },
     ],
     ["Network.setCacheDisabled", { cacheDisabled: true }],
+    ["Network.setCacheDisabled", { cacheDisabled: false }],
     [
       "Fetch.enable",
       {
         handleAuthRequests: true,
         patterns: [{ urlPattern: "*", requestStage: "Request" }],
+      },
+    ],
+    ["Fetch.disable", {}],
+    ["Fetch.continueRequest", { requestId: "interception-1" }],
+    ["Fetch.failRequest", { requestId: "interception-1", errorReason: "Failed" }],
+    [
+      "Fetch.fulfillRequest",
+      {
+        requestId: "interception-1",
+        responseCode: 204,
+        responsePhrase: "No Content",
+        responseHeaders: [],
+        body: "",
       },
     ],
     ["Runtime.runIfWaitingForDebugger", undefined],
@@ -95,12 +109,25 @@ describe("task bootstrap CDP contract", () => {
     ["Page.enable", { extra: true }],
     ["Page.setFontFamilies", { fontFamilies: { systemUi: "Segoe UI" } }],
     ["Page.setFontFamilies", { fontFamilies: { sansSerif: "x".repeat(257) } }],
-    ["Network.setCacheDisabled", { cacheDisabled: false }],
+    ["Network.setCacheDisabled", { cacheDisabled: "false" }],
     [
       "Fetch.enable",
       {
         handleAuthRequests: true,
         patterns: [{ urlPattern: "*", requestStage: "Response" }],
+      },
+    ],
+    ["Fetch.disable", { extra: true }],
+    ["Fetch.continueRequest", { requestId: "interception-1", url: "https://example.com" }],
+    ["Fetch.failRequest", { requestId: "interception-1", errorReason: "Aborted" }],
+    [
+      "Fetch.fulfillRequest",
+      {
+        requestId: "interception-1",
+        responseCode: 200,
+        responsePhrase: "OK",
+        responseHeaders: [],
+        body: "",
       },
     ],
     [

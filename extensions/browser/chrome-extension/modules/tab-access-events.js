@@ -23,6 +23,7 @@ export function registerTabAccessEvents({
   taskTabs = {
     registerDescendant: () => null,
     generationFor: () => undefined,
+    isInitializing: () => false,
     forget: () => undefined,
     replace: () => false,
     revoke: () => undefined,
@@ -108,12 +109,17 @@ export function registerTabAccessEvents({
       return;
     }
     const accessEpoch = attachedAccessEpochs.get(source.tabId);
-    if (!accessEpoch || !policy.epochIsCurrent(source.tabId, accessEpoch)) {
+    const accessIsCurrent = accessEpoch && policy.epochIsCurrent(source.tabId, accessEpoch);
+    const taskGeneration = taskTabs.isInitializing?.(source.tabId)
+      ? taskTabs.generationFor?.(source.tabId)
+      : undefined;
+    if (!accessIsCurrent && !taskGeneration) {
       return;
     }
     send({
       type: "cdpEvent",
       tabId: source.tabId,
+      ...(taskGeneration ? { taskGeneration } : {}),
       ...(source.sessionId ? { sessionId: source.sessionId } : {}),
       method,
       params,

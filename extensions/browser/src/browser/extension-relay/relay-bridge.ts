@@ -424,7 +424,13 @@ export class ExtensionRelayBridge {
         return;
       }
       case "cdpEvent": {
-        this.forwardExtensionEvent(msg.tabId, msg.sessionId, msg.method, msg.params);
+        this.forwardExtensionEvent(
+          msg.tabId,
+          msg.taskGeneration,
+          msg.sessionId,
+          msg.method,
+          msg.params,
+        );
         return;
       }
       case "tabs": {
@@ -655,6 +661,8 @@ export class ExtensionRelayBridge {
         }
       }
       const shouldAttach = !existing || existing.restoreAttachment;
+      const taskGenerationToPublish =
+        existing && !existing.published ? existing.taskGeneration : undefined;
       if (existing) {
         existing.info = info;
         existing.published = true;
@@ -665,6 +673,15 @@ export class ExtensionRelayBridge {
           published: true,
           taskGeneration: info.taskGeneration,
           restoreAttachment: false,
+        });
+      }
+      if (taskGenerationToPublish) {
+        void this.callExtension({
+          type: "publishTask",
+          tabId: info.tabId,
+          taskGeneration: taskGenerationToPublish,
+        }).catch((error: unknown) => {
+          log.warn(`task publication acknowledgement failed: ${String(error)}`);
         });
       }
       if (shouldAutoAttach && shouldAttach) {
@@ -841,16 +858,22 @@ export class ExtensionRelayBridge {
 
   private forwardExtensionEvent(
     tabId: number,
+    taskGeneration: string | undefined,
     childSessionId: string | undefined,
     method: string,
     params: unknown,
   ): void {
     const tab = this.tabs.get(tabId);
-    const rootSessionId = tab?.published ? tab.attached?.sessionId : undefined;
+    const taskOwner =
+      tab && !tab.published && tab.taskGeneration === taskGeneration && taskGeneration !== undefined
+        ? tab.taskOwner
+        : undefined;
+    const rootSessionId = tab && (tab.published || taskOwner) ? tab.attached?.sessionId : undefined;
     if (!rootSessionId) {
       return;
     }
     const sessionId = childSessionId ?? rootSessionId;
+    const recipients = taskOwner ? [taskOwner] : [...this.clients];
     if (childSessionId) {
       this.childSessions.set(childSessionId, tabId);
     }
@@ -860,7 +883,7 @@ export class ExtensionRelayBridge {
       const announced = (params as { sessionId?: unknown } | null)?.sessionId;
       if (typeof announced === "string") {
         this.childSessions.set(announced, tabId);
-        for (const client of this.clients) {
+        for (const client of recipients) {
           if (client.announcedSessions.has(sessionId)) {
             client.announcedSessions.add(announced);
           }
@@ -868,12 +891,12 @@ export class ExtensionRelayBridge {
       }
     }
     const frame = JSON.stringify({ sessionId, method, params });
-    for (const client of this.clients) {
+    for (const client of recipients) {
       if (client.announcedSessions.has(sessionId)) {
         client.socket.send(frame);
       }
     }
-    if (!childSessionId) {
+    if (!childSessionId && tab?.published) {
       // Page-scoped CDP sessions multiplex the same chrome.debugger root.
       // Mirror root events so Runtime/Page/Network listeners observe the
       // domains they enabled through their own synthetic session.
@@ -1043,6 +1066,22 @@ export class ExtensionRelayBridge {
     const route = this.tabBySessionId(sessionId);
     if (!route) {
       this.respondError(client, request, `Session not found: ${sessionId}`, -32001);
+      return;
+    }
+    if (request.method === "Target.getTargetInfo") {
+      const tab = this.tabs.get(route.tabId);
+      if (!tab?.attached) {
+        this.respondError(
+          client,
+          request,
+          `Target identity is unavailable: ${route.tabId}`,
+          -32002,
+        );
+        return;
+      }
+      this.respond(client, request, {
+        targetInfo: this.targetInfoForTab(tab, tab.attached.targetId),
+      });
       return;
     }
     if (request.method === "Page.navigate") {
