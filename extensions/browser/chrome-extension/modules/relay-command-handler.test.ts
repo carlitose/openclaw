@@ -26,6 +26,7 @@ function createHarness() {
     newGeneration: () => "task-generation-1",
   });
   const attachCreatedDebugger = vi.fn(async () => ({ targetId: "target-created" }));
+  const syncTabsToRelay = vi.fn(async (): Promise<void> => undefined);
   const handler = createRelayCommandHandler({
     send,
     attachDebugger: vi.fn(),
@@ -33,6 +34,7 @@ function createHarness() {
     addTabToOpenClawGroup,
     focusWindowForTab,
     scheduleTabsSync: vi.fn(),
+    syncTabsToRelay,
     captureAccess: vi.fn(() => epoch),
     requireAccessibleTab,
     rememberUtilityWorld,
@@ -49,6 +51,7 @@ function createHarness() {
     rememberUtilityWorld,
     requireAccessibleTab,
     send,
+    syncTabsToRelay,
     taskTabs,
   };
 }
@@ -120,8 +123,15 @@ describe("relay authority rechecks", () => {
   it("ends bootstrap authority only after the relay publishes the exact task", async () => {
     const harness = createHarness();
     const taskGeneration = harness.taskTabs.registerRoot(7);
+    let finishSync: (() => void) | undefined;
+    harness.syncTabsToRelay.mockImplementationOnce(
+      async () =>
+        await new Promise<void>((resolve) => {
+          finishSync = resolve;
+        }),
+    );
 
-    await harness.handler({
+    const publishing = harness.handler({
       type: "publishTask",
       seq: 12,
       tabId: 7,
@@ -129,6 +139,10 @@ describe("relay authority rechecks", () => {
     });
 
     expect(harness.taskTabs.isInitializing(7)).toBe(false);
+    await vi.waitFor(() => expect(harness.syncTabsToRelay).toHaveBeenCalledOnce());
+    expect(harness.send).not.toHaveBeenCalled();
+    finishSync?.();
+    await publishing;
     expect(harness.send).toHaveBeenCalledWith({ type: "result", seq: 12, result: {} });
 
     await harness.handler({

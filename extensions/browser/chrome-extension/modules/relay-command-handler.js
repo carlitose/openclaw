@@ -8,6 +8,7 @@ export function createRelayCommandHandler({
   addTabToOpenClawGroup,
   focusWindowForTab,
   scheduleTabsSync,
+  syncTabsToRelay,
   captureAccess,
   requireAccessibleTab,
   rememberUtilityWorld,
@@ -117,7 +118,13 @@ export function createRelayCommandHandler({
           if (!taskTabs.owns(message.tabId, message.taskGeneration)) {
             throw new Error(`task ownership for tab ${message.tabId} is no longer current`);
           }
-          taskTabs.publish(message.tabId);
+          if (!taskTabs.publish(message.tabId)) {
+            throw new Error(`task publication for tab ${message.tabId} is no longer current`);
+          }
+          // Publication changes which access policy owns the tab. Project that
+          // current state before acknowledging, or a pre-publication inventory
+          // can arrive later and detach the newly returned page.
+          await syncTabsToRelay();
           send({ type: "result", seq, result: {} });
           return;
         }

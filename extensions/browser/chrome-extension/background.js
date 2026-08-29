@@ -25,6 +25,7 @@ import {
 import { findOpenClawGroups, isTabSelected } from "./modules/relay-tab-groups.js";
 import { registerTabAccessEvents } from "./modules/tab-access-events.js";
 import { createTabAccessPolicy } from "./modules/tab-access.js";
+import { createTabInventorySync } from "./modules/tab-inventory-sync.js";
 import { createTaskTabLifecycle } from "./modules/task-tab-lifecycle.js";
 
 const BADGE = {
@@ -65,8 +66,6 @@ const attachmentTokens = new Map();
 const attachingTabs = new Map();
 /** Root automation world learned from the active debugger client's setup. */
 const utilityWorldNames = new Map();
-/** Debounce handle for tab-list refreshes. */
-let tabsSyncTimer = null;
 let accessMutationChain = Promise.resolve();
 const pairingConfigStore = createPairingConfigStore(chrome.storage.local);
 const navigationPolicyController = createNavigationPolicyController({
@@ -225,37 +224,38 @@ async function removeTabFromOpenClawGroup(tabId) {
   }
 }
 
-function scheduleTabsSync() {
-  if (tabsSyncTimer) {
-    return;
-  }
-  tabsSyncTimer = setTimeout(() => {
-    tabsSyncTimer = null;
-    void syncTabsToRelay();
-  }, 150);
-}
-
-async function syncTabsToRelay() {
-  if (retiredCopilotCustodyBlocked) {
-    return;
-  }
-  if (!relayWs || relayWs.readyState !== WebSocket.OPEN || relayAuthenticatedSocket !== relayWs) {
-    return;
-  }
-  const accessible = await tabAccessPolicy.listAccessibleTabs();
-  const accessibleIds = new Set(accessible.map((tab) => tab.id));
-  for (const tabId of attachedTabs) {
-    // Task-owned attachments can be intentionally unpublished while about:blank
-    // navigates. Their exact lifecycle owner revokes them on denial or cleanup.
-    if (!accessibleIds.has(tabId) && !taskTabs.isInitializing(tabId)) {
-      void detachDebugger(tabId);
+const tabInventorySync = createTabInventorySync({
+  debounceMs: 150,
+  sync: async (isCurrent) => {
+    if (
+      retiredCopilotCustodyBlocked ||
+      !relayWs ||
+      relayWs.readyState !== WebSocket.OPEN ||
+      relayAuthenticatedSocket !== relayWs
+    ) {
+      return;
     }
-  }
-  send({
-    type: "tabs",
-    tabs: accessible.map((tab) => toRelayTabInfo(tab, taskTabs.generationFor(tab.id))),
-  });
-}
+    const accessible = await tabAccessPolicy.listAccessibleTabs();
+    if (!isCurrent()) {
+      return;
+    }
+    const accessibleIds = new Set(accessible.map((tab) => tab.id));
+    for (const tabId of attachedTabs) {
+      // Task-owned attachments can be intentionally unpublished while about:blank
+      // navigates. Their exact lifecycle owner revokes them on denial or cleanup.
+      if (!accessibleIds.has(tabId) && !taskTabs.isInitializing(tabId)) {
+        void detachDebugger(tabId);
+      }
+    }
+    send({
+      type: "tabs",
+      tabs: accessible.map((tab) => toRelayTabInfo(tab, taskTabs.generationFor(tab.id))),
+    });
+  },
+});
+
+const scheduleTabsSync = () => tabInventorySync.schedule();
+const syncTabsToRelay = () => tabInventorySync.flush();
 
 // ---------------------------------------------------------------------------
 // chrome.debugger transport
@@ -503,6 +503,7 @@ const handleRelayCommand = createRelayCommandHandler({
   addTabToOpenClawGroup,
   focusWindowForTab,
   scheduleTabsSync,
+  syncTabsToRelay,
   captureAccess: (tabId) => tabAccessPolicy.capture(tabId),
   requireAccessibleTab: (tabId, epoch) => tabAccessPolicy.requireTab(tabId, epoch),
   rememberUtilityWorld: (tabId, worldName) => {

@@ -9,6 +9,7 @@ export function createRelayCommandHandler(params: {
   addTabToOpenClawGroup: (tabId: number) => Promise<void>;
   focusWindowForTab: (tab: BrowserTabSnapshot) => Promise<void>;
   scheduleTabsSync: () => void;
+  syncTabsToRelay: () => Promise<void>;
   captureAccess: (tabId: number) => TabAccessEpoch;
   requireAccessibleTab: (
     tabId: number,
