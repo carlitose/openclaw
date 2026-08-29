@@ -4,13 +4,13 @@ title: "Implement extension-profile launch and readiness"
 identity_key: artifact:ticket-personal-chrome-browser-control-03
 identity_strength: stable
 source_path: docs/internal/personal-chrome-browser-control/tickets/done/03-implement-extension-profile-launch-and-readiness.md
-source_digest: sha256:e81a08030705ae618ba31a81261d166e6c8936a7f3b17f9caa563ae2224b8c9e
+source_digest: sha256:2cb7e6ce83bfcb2d4024c8070831b8cb030b085b619b0976a73cb08a58a03299
 source_status: present
 artefact_kind: ticket
 disposition: completed
 created: 2026-08-28
-updated: 2026-08-28
-created_provenance: mtime
+updated: 2026-08-29
+created_provenance: git-commit
 disposition_changed:
 disposition_changed_provenance: unknown
 run_id: personal-chrome-ticket03-main-v2

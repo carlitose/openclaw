@@ -2,7 +2,7 @@
 type: concept
 title: Evidence lanes
 created: 2026-08-28
-updated: 2026-08-28
+updated: 2026-08-29
 sources:
   [
     artifact-wayfinder-personal-chrome-browser-control,
@@ -24,8 +24,8 @@ observe it. A green lane does not inherit the capabilities of the lane above it.
 
 ```mermaid
 flowchart TB
-    U[Unit and protocol tests] --> D[Direct Docker package and relay]
-    D --> W[Native disposable Windows Chrome]
+    U[Unit and protocol tests] --> C[Isolated packaged container and relay]
+    C --> W[Native disposable Chrome]
     W --> V[Human-approved disposable Windows VM]
     V --> P[Human-approved personal Chrome acceptance]
 ```
@@ -33,17 +33,19 @@ flowchart TB
 Unit and protocol tests own deterministic matcher, state-machine, failure, and cleanup logic.
 They are fast and causally precise, but Chrome behavior remains mocked.
 
-The Docker lane builds the supported package and runs an isolated Gateway and synthetic relay
-peer. It proves package contents, config parsing, protocol negotiation, direct CDP policy,
-typed errors, and task-owned cleanup in Linux. The actual Ticket 01 verification used direct
-Docker build/run with read-only mounts; it did not use Docker Compose. Docker cannot establish
-MV3 worker behavior, Windows profile selection, Chrome grouping, interactive desktop startup,
-or DPAPI-bound session state.
+The isolated container lane builds the supported package and runs an isolated Gateway and
+synthetic relay peer. It proves package contents, config parsing, protocol negotiation, direct
+CDP policy, typed errors, and task-owned cleanup in Linux. Ticket 01 historically used direct
+Docker build/run. The current Ticket 06 proof used native Apple `container`, Linux ARM64,
+16 GB RAM, 8 CPUs, read-only mounts, and no network. Neither container runtime can establish
+MV3 worker behavior, interactive desktop startup, or host-bound session state.
 
-Native disposable Windows Chrome loads only the candidate unpacked extension into a temporary
-Chrome for Testing profile. It proves real tab and popup events, exact group movement,
-extension pairing, launch/readiness, reconnect, renderer replacement, revoke, and physical
-cleanup without touching personal Chrome. Ticket 04's real-Chromium proof belongs here.
+Native disposable Chrome loads only the candidate unpacked extension into a temporary Chrome
+for Testing profile. It can prove real tab and popup events, exact group movement, extension
+pairing, launch/readiness, reconnect, renderer replacement, revoke, and physical cleanup
+without touching personal Chrome. Ticket 06 passed its local native Chromium scenarios, while
+the separate packaged Windows probe remains incomplete because Chrome intermittently lost the
+debugger attachment.
 
 The disposable Windows VM owns restart-sensitive behavior: interactive logon, Gateway and
 Chrome restart, extension-worker restart, RDP transitions where supported, and Windows reboot.
@@ -57,9 +59,10 @@ the run.
 ## Why the separation matters
 
 A lower lane can expose a defect that blocks higher work, but it cannot certify higher
-environment behavior. This keeps claims honest and prevents resource pressure from turning
-Docker into a false substitute for Windows or personal Chrome. The current completion state is
-tracked in [[synthesis/implementation-frontier]].
+environment behavior. This keeps claims honest and prevents a passing 16 GB container run from
+being treated as restart or personal-profile evidence. The current completion state is tracked
+in [[synthesis/implementation-frontier]] and
+[[sources/ticket-autopilot-personal-chrome-afk-05-06-main-v1-status]].
 
 ## Sources
 
@@ -68,3 +71,4 @@ tracked in [[synthesis/implementation-frontier]].
 - [[sources/artifact-ticket-personal-chrome-browser-control-07]]
 - [[sources/artifact-ticket-personal-chrome-browser-control-08]]
 - [[sources/artifact-wayfinder-personal-chrome-browser-control]]
+- [[sources/ticket-autopilot-personal-chrome-afk-05-06-main-v1-status]]

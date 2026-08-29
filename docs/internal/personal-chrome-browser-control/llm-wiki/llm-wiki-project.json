@@ -5,7 +5,7 @@
     "docs/internal/personal-chrome-browser-control/tickets/**/*.md"
   ],
   "git_mode": "auto",
-  "project_root": "C:\\Users\\rdpuser\\projects\\openclaw-upstream",
+  "project_root": "/Users/carlogiuseppesergi/Projects/openclaw",
   "schema": 1,
   "session_providers": [
     "claude-code",

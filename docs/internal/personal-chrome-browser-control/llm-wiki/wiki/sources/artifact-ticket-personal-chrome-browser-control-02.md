@@ -4,13 +4,13 @@ title: "Decide the browser domain-policy seam"
 identity_key: artifact:ticket-personal-chrome-browser-control-02
 identity_strength: stable
 source_path: docs/internal/personal-chrome-browser-control/tickets/done/02-decide-browser-domain-policy-seam.md
-source_digest: sha256:17a4add8ae17c5b85a3957ed161d708f542aca5d52f8eddc2f62efddd882c4a4
+source_digest: sha256:1ef548ac90c40851dfce6587b5986b3c410127ef0151aa880d4c30f846329b3a
 source_status: present
 artefact_kind: ticket
 disposition: completed
 created: 2026-08-28
-updated: 2026-08-28
-created_provenance: mtime
+updated: 2026-08-29
+created_provenance: git-commit
 disposition_changed:
 disposition_changed_provenance: unknown
 run_id: personal-chrome-ticket02-main-v3
