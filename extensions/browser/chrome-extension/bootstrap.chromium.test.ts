@@ -520,6 +520,23 @@ describe.runIf(runE2E)("Chrome native bootstrap Chromium E2E", () => {
         expect(taskOpenResponse.body).toMatchObject({ url: taskOpenUrl });
         process.stderr.write("[browser-extension-e2e] relay task tab opened and navigated\n");
 
+        const taskTargetId = (taskOpenResponse.body as { targetId?: string }).targetId;
+        if (!taskTargetId) {
+          throw new Error(
+            `Relay task tab open did not return a target: ${JSON.stringify(taskOpenResponse.body)}`,
+          );
+        }
+        const taskSnapshotResponse = await dispatcher.dispatch({
+          method: "GET",
+          path: "/snapshot",
+          query: { profile: "e2e", targetId: taskTargetId, format: "ai" },
+        });
+        expect(taskSnapshotResponse.status, JSON.stringify(taskSnapshotResponse.body)).toBe(200);
+        expect(taskSnapshotResponse.body).toMatchObject({
+          snapshot: expect.stringContaining("Offscreen target"),
+        });
+        process.stderr.write("[browser-extension-e2e] relay task tab snapshot captured\n");
+
         const distractingPage = await context.newPage();
         const distractingUrl = `http://127.0.0.1:${gatewayPort}/unrelated`;
         await distractingPage.goto(distractingUrl);

@@ -26,7 +26,11 @@ import type { CdpActionTimeouts } from "./cdp.js";
 import { getChromeMcpModule } from "./chrome-mcp.runtime.js";
 import type { BrowserOpenResult } from "./client.types.js";
 import type { ResolvedBrowserProfile } from "./config.js";
-import { BrowserTabNotFoundError, BrowserTargetAmbiguousError } from "./errors.js";
+import {
+  BrowserProfileUnavailableError,
+  BrowserTabNotFoundError,
+  BrowserTargetAmbiguousError,
+} from "./errors.js";
 import {
   assertBrowserNavigationAllowed,
   assertBrowserNavigationResultAllowed,
@@ -323,10 +327,20 @@ export function createProfileTabOps({ profile, state, runtime }: TabOpsDeps): Pr
           cdpPolicy: getCdpControlPolicy(),
           ...ssrfPolicyOpts,
         });
+        let targetId = page.targetId;
+        if (profile.driver === "extension") {
+          const relay = state().extensionRelays?.get(profile.name);
+          if (!relay) {
+            throw new BrowserProfileUnavailableError(
+              "Browser extension relay disappeared before the created tab was published.",
+            );
+          }
+          targetId = await relay.bridge.waitForPublishedTarget(targetId, opts?.signal);
+        }
         return adoptValidatedTab(
           await withTabOwnership(
             {
-              targetId: page.targetId,
+              targetId,
               title: page.title,
               url: page.url,
               type: page.type,

@@ -39,7 +39,10 @@ function replyFor(msg: RelayToExtensionMessage): ExtensionToRelayMessage | null 
   }
 }
 
-function wireExtension(bridge: ExtensionRelayBridge, opts: { syncCreatedTab?: boolean } = {}) {
+function wireExtension(
+  bridge: ExtensionRelayBridge,
+  opts: { holdPublication?: boolean; syncCreatedTab?: boolean } = {},
+) {
   const socket = new FakeSocket();
   const handlers = bridge.attachExtensionSocket(socket);
   const originalSend = socket.send.bind(socket);
@@ -50,6 +53,9 @@ function wireExtension(bridge: ExtensionRelayBridge, opts: { syncCreatedTab?: bo
       return;
     }
     queueMicrotask(() => {
+      if (msg.type === "publishTask" && opts.holdPublication) {
+        return;
+      }
       const reply = replyFor(msg);
       if (!reply) {
         return;
@@ -128,6 +134,64 @@ describe("ExtensionRelayBridge task tabs", () => {
         taskGeneration: "task-generation-999",
       }),
     );
+  });
+
+  it("publishes a created target only after the exact extension acknowledgement", async () => {
+    const bridge = new ExtensionRelayBridge();
+    try {
+      const { socket, handlers } = wireExtension(bridge, { holdPublication: true });
+      sendHello(handlers);
+      const client = new FakeSocket();
+      const cdp = bridge.attachCdpClientSocket(client);
+      cdp.onMessage(
+        JSON.stringify({
+          id: 1,
+          method: "Target.createTarget",
+          params: { url: "https://new.test" },
+        }),
+      );
+      await flush();
+
+      const publication = socket.frames().find((frame) => frame.type === "publishTask") as
+        | { seq?: number }
+        | undefined;
+      if (typeof publication?.seq !== "number") {
+        throw new Error("expected task publication command");
+      }
+      const waiting = bridge.waitForPublishedTarget("target-999");
+      const initialSession = client
+        .frames()
+        .find((frame) => frame.method === "Target.attachedToTarget")?.params as
+        | { sessionId?: string }
+        | undefined;
+      if (typeof initialSession?.sessionId !== "string") {
+        throw new Error("expected initial task attachment");
+      }
+      let settled = false;
+      void waiting.then(() => {
+        settled = true;
+      });
+      await flush();
+      expect(settled).toBe(false);
+      expect(bridge.accessibleTabs()).not.toContainEqual(expect.objectContaining({ tabId: 999 }));
+
+      handlers.onMessage(JSON.stringify({ type: "result", seq: publication.seq, result: {} }));
+
+      await expect(waiting).resolves.toBe("target-999");
+      expect(bridge.accessibleTabs()).toContainEqual(expect.objectContaining({ tabId: 999 }));
+      const refreshedSessions = client
+        .frames()
+        .filter((frame) => frame.method === "Target.attachedToTarget")
+        .map((frame) => (frame.params as { sessionId?: string }).sessionId);
+      expect(refreshedSessions).toHaveLength(2);
+      expect(refreshedSessions[1]).not.toBe(initialSession.sessionId);
+      expect(client.frames()).toContainEqual({
+        method: "Target.detachedFromTarget",
+        params: { sessionId: initialSession.sessionId, targetId: "target-999" },
+      });
+    } finally {
+      bridge.dispose();
+    }
   });
 
   it("keeps about:blank task bootstrap out of accessible inventory", async () => {

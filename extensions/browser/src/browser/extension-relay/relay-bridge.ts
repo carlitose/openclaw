@@ -68,6 +68,8 @@ type TabState = {
   taskGeneration?: string;
   /** The sole CDP client allowed to initialize this task before policy publication. */
   taskOwner?: CdpClientState;
+  /** Exact extension acknowledgement that ends unpublished task authority. */
+  publishing?: Promise<void>;
   /** Set while chrome.debugger is attached: real CDP targetId + synthetic root sessionId. */
   attached?: { targetId: string; sessionId: string };
   attaching?: Promise<{ targetId: string; sessionId: string }>;
@@ -231,6 +233,52 @@ export class ExtensionRelayBridge {
         : this.tabs.get(target.tabId);
       return current === target.tab && current.published ? current.attached?.targetId : undefined;
     };
+  }
+
+  /** Wait for the exact created task to cross the extension publication boundary. */
+  async waitForPublishedTarget(targetId: string, signal?: AbortSignal): Promise<string> {
+    const extension = this.extension;
+    const target = this.tabByTargetId(targetId);
+    if (!extension || !target) {
+      throw new Error("Created browser task is no longer available for publication.");
+    }
+    const tab = target.tab;
+    const generation = tab.taskGeneration;
+    const timeout = new AbortController();
+    const timer = setTimeout(
+      () => timeout.abort(new Error("Created browser task publication timed out.")),
+      EXTENSION_COMMAND_TIMEOUT_MS,
+    );
+    timer.unref?.();
+    const waitSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
+    try {
+      for (;;) {
+        signal?.throwIfAborted();
+        if (this.extension !== extension) {
+          throw new Error("Browser extension changed before the created task was published.");
+        }
+        const current = generation
+          ? [...this.tabs.values()].find((candidate) => candidate.taskGeneration === generation)
+          : this.tabs.get(target.tabId);
+        if (current !== tab) {
+          throw new Error("Created browser task disappeared before publication.");
+        }
+        if (current.published && current.attached) {
+          return current.attached.targetId;
+        }
+        try {
+          await once(this.connectionEvents, "tabs", { signal: waitSignal });
+        } catch (error) {
+          signal?.throwIfAborted();
+          if (timeout.signal.aborted) {
+            throw timeout.signal.reason;
+          }
+          throw error;
+        }
+      }
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -665,8 +713,10 @@ export class ExtensionRelayBridge {
         existing && !existing.published ? existing.taskGeneration : undefined;
       if (existing) {
         existing.info = info;
-        existing.published = true;
-        existing.taskOwner = undefined;
+        if (!taskGenerationToPublish) {
+          existing.published = true;
+          existing.taskOwner = undefined;
+        }
       } else {
         this.tabs.set(info.tabId, {
           info,
@@ -675,14 +725,8 @@ export class ExtensionRelayBridge {
           restoreAttachment: false,
         });
       }
-      if (taskGenerationToPublish) {
-        void this.callExtension({
-          type: "publishTask",
-          tabId: info.tabId,
-          taskGeneration: taskGenerationToPublish,
-        }).catch((error: unknown) => {
-          log.warn(`task publication acknowledgement failed: ${String(error)}`);
-        });
+      if (existing && taskGenerationToPublish) {
+        this.beginTaskPublication(info.tabId, existing, taskGenerationToPublish);
       }
       if (shouldAutoAttach && shouldAttach) {
         void this.ensureTabAttached(info.tabId)
@@ -695,6 +739,72 @@ export class ExtensionRelayBridge {
       }
     }
     this.connectionEvents.dispatchEvent(new Event("tabs"));
+  }
+
+  private beginTaskPublication(tabId: number, tab: TabState, taskGeneration: string): void {
+    if (tab.publishing) {
+      return;
+    }
+    const extension = this.extension;
+    tab.publishing = (async () => {
+      try {
+        await this.callExtension({ type: "publishTask", tabId, taskGeneration });
+        const current = [...this.tabs.values()].find(
+          (candidate) => candidate.taskGeneration === taskGeneration,
+        );
+        if (this.extension !== extension || current !== tab) {
+          return;
+        }
+        const currentEntry = [...this.tabs.entries()].find(
+          ([, candidate]) => candidate === current,
+        );
+        if (!currentEntry) {
+          return;
+        }
+        const currentTabId = currentEntry[0];
+        const taskOwner = current.taskOwner;
+        if (current.attached) {
+          const stale = current.attached;
+          current.attached = undefined;
+          current.restoreAttachment = true;
+          // Bootstrap intentionally rejects content evaluation before publication.
+          // Rotate that synthetic session so Playwright cannot reuse its partial page state.
+          this.emitDetachedFromTarget(currentTabId, stale.sessionId, stale.targetId);
+        }
+        const shouldRefresh =
+          (taskOwner && this.clients.has(taskOwner)) ||
+          [...this.clients].some((client) => client.autoAttach);
+        const refreshed = shouldRefresh ? await this.ensureTabAttached(currentTabId) : undefined;
+        current.published = true;
+        current.taskOwner = undefined;
+        if (refreshed) {
+          this.announceAttachedTab(currentTabId, refreshed.targetId, refreshed.sessionId, {
+            onlyAutoAttach: true,
+          });
+          if (taskOwner && this.clients.has(taskOwner)) {
+            this.announceAttachedTab(currentTabId, refreshed.targetId, refreshed.sessionId, {
+              onlyAutoAttach: false,
+              onlyClient: taskOwner,
+            });
+          }
+        }
+      } catch (error) {
+        log.warn(`task publication acknowledgement failed: ${String(error)}`);
+        const currentEntry = [...this.tabs.entries()].find(
+          ([, candidate]) => candidate === tab && candidate.taskGeneration === taskGeneration,
+        );
+        if (this.extension === extension && currentEntry) {
+          await this.cleanupOwnedTask(currentEntry[0], taskGeneration).catch(
+            (cleanupError: unknown) => {
+              log.warn(`failed task publication cleanup: ${String(cleanupError)}`);
+            },
+          );
+        }
+      } finally {
+        tab.publishing = undefined;
+        this.connectionEvents.dispatchEvent(new Event("tabs"));
+      }
+    })();
   }
 
   private async ensureTabAttached(tabId: number): Promise<{ targetId: string; sessionId: string }> {
