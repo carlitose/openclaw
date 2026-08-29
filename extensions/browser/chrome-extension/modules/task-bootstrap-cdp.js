@@ -6,7 +6,7 @@ const MEDIA_FEATURES = [
   ["prefers-color-scheme", ["", "light", "dark", "no-preference"]],
   ["prefers-reduced-motion", ["", "reduce", "no-preference"]],
   ["forced-colors", ["", "active", "none"]],
-  ["prefers-contrast", ["", "no-preference", "more", "less", "custom"]],
+  ["prefers-contrast", ["", "no-preference", "more"]],
 ];
 
 function hasExactKeys(value, keys) {

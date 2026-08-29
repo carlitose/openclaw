@@ -100,6 +100,18 @@ describe("task bootstrap CDP contract", () => {
       },
     ],
     [
+      "Emulation.setEmulatedMedia",
+      {
+        media: "",
+        features: [
+          { name: "prefers-color-scheme", value: "light" },
+          { name: "prefers-reduced-motion", value: "no-preference" },
+          { name: "forced-colors", value: "none" },
+          { name: "prefers-contrast", value: "custom" },
+        ],
+      },
+    ],
+    [
       "Page.setFontFamilies",
       {
         fontFamilies: { sansSerif: "Arial" },
