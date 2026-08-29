@@ -80,6 +80,18 @@ function isEmulatedMediaBootstrap(params) {
   );
 }
 
+function isRequestInterceptionBootstrap(params) {
+  return (
+    hasExactKeys(params, ["handleAuthRequests", "patterns"]) &&
+    params.handleAuthRequests === true &&
+    Array.isArray(params.patterns) &&
+    params.patterns.length === 1 &&
+    hasExactKeys(params.patterns[0], ["urlPattern", "requestStage"]) &&
+    params.patterns[0].urlPattern === "*" &&
+    params.patterns[0].requestStage === "Request"
+  );
+}
+
 /** Commands needed to initialize an unpublished empty page without reading or executing content. */
 export function isTaskBootstrapCdpCommand(method, params) {
   switch (method) {
@@ -123,6 +135,12 @@ export function isTaskBootstrapCdpCommand(method, params) {
       );
     case "Emulation.setEmulatedMedia":
       return isEmulatedMediaBootstrap(params);
+    case "Network.setCacheDisabled":
+      // Playwright installs its request guard before the first URL. Exact task/client
+      // ownership keeps this inert setup on the hidden tab; rejecting it dead-ends navigation.
+      return hasExactKeys(params, ["cacheDisabled"]) && params.cacheDisabled === true;
+    case "Fetch.enable":
+      return isRequestInterceptionBootstrap(params);
     default:
       return false;
   }

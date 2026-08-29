@@ -72,6 +72,14 @@ describe("task bootstrap CDP contract", () => {
         ],
       },
     ],
+    ["Network.setCacheDisabled", { cacheDisabled: true }],
+    [
+      "Fetch.enable",
+      {
+        handleAuthRequests: true,
+        patterns: [{ urlPattern: "*", requestStage: "Request" }],
+      },
+    ],
     ["Runtime.runIfWaitingForDebugger", undefined],
   ])("allows %s with its inert bootstrap parameters", (method, params) => {
     expect(isTaskBootstrapCdpCommand(method, params)).toBe(true);
@@ -87,6 +95,14 @@ describe("task bootstrap CDP contract", () => {
     ["Page.enable", { extra: true }],
     ["Page.setFontFamilies", { fontFamilies: { systemUi: "Segoe UI" } }],
     ["Page.setFontFamilies", { fontFamilies: { sansSerif: "x".repeat(257) } }],
+    ["Network.setCacheDisabled", { cacheDisabled: false }],
+    [
+      "Fetch.enable",
+      {
+        handleAuthRequests: true,
+        patterns: [{ urlPattern: "*", requestStage: "Response" }],
+      },
+    ],
     [
       "Emulation.setEmulatedMedia",
       {
